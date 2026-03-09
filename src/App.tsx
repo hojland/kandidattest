@@ -15,6 +15,7 @@ import { buildSystemPrompt } from "./lib/system-prompt";
 import { checkWebGPU } from "./lib/webgpu";
 import { StorkredsSelector } from "./components/StorkredsSelector";
 import { CandidateResults } from "./components/CandidateResults";
+import { ChoiceToolUI } from "./components/ChoiceButtons";
 
 interface Storkreds {
   name: string;
@@ -61,6 +62,21 @@ function ModelLoadingOverlay({ items }: { items: Map<string, number> }) {
 
 function TextPart() {
   const part = useMessagePartText();
+  const isThinking = part.text.includes("💭 Tænker...");
+
+  if (isThinking) {
+    // Split into visible text + thinking indicator
+    const visibleText = part.text.replace(/\n*💭 Tænker\.\.\.$/, "").trim();
+    return (
+      <>
+        {visibleText && <span>{visibleText}</span>}
+        <span className="block text-gray-400 italic text-sm animate-pulse mt-1">
+          Tænker...
+        </span>
+      </>
+    );
+  }
+
   return <span>{part.text}</span>;
 }
 
@@ -365,6 +381,7 @@ export default function App() {
           </div>
         )}
       </div>
+      <ChoiceToolUI />
       <MatchDetector
         onMatch={handleMatchDetected}
         matchTriggered={matches !== null}

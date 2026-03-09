@@ -1,4 +1,5 @@
 import type { ChatModelAdapter } from "@assistant-ui/react";
+import { stripThinking, parseChoices, nextChoiceId } from "./shared";
 
 export function createLLMAdapter(
   worker: Worker,
@@ -54,7 +55,45 @@ export function createLLMAdapter(
           });
           if (result.done) break;
           fullText += result.value;
-          yield { content: [{ type: "text" as const, text: fullText }] };
+
+          const { text, isThinking } = stripThinking(fullText);
+
+          if (isThinking && !text) {
+            yield {
+              content: [{ type: "text" as const, text: "💭 Tænker..." }],
+            };
+            continue;
+          }
+
+          const displayText = isThinking ? text + "\n\n💭 Tænker..." : text;
+          const { textBefore, options, hasCompleteChoice, hasPartialChoice } =
+            parseChoices(displayText);
+
+          if (hasPartialChoice) {
+            const content: Array<{ type: "text"; text: string }> = [];
+            if (textBefore) content.push({ type: "text" as const, text: textBefore });
+            content.push({ type: "text" as const, text: "💭 Tænker..." });
+            yield { content };
+          } else if (hasCompleteChoice && options.length > 0) {
+            const toolCallId = nextChoiceId();
+            const content: Array<any> = [];
+            if (textBefore) content.push({ type: "text" as const, text: textBefore });
+            content.push({
+              type: "tool-call" as const,
+              toolCallId,
+              toolName: "user_choice",
+              args: { options },
+              argsText: JSON.stringify({ options }),
+            });
+            yield {
+              content,
+              status: { type: "requires-action" as const, reason: "tool-calls" as const },
+            };
+          } else {
+            yield {
+              content: [{ type: "text" as const, text: displayText }],
+            };
+          }
         }
       } finally {
         worker.removeEventListener("message", onMessage);
