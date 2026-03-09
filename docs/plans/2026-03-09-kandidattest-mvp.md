@@ -20,9 +20,14 @@
 
 ## Data we have
 
-- `data/candidates_raw.json` — 918 candidates, 24 national questions (answer scale -2 to +2), free-text comments (689 candidates), priorities, local questions
-- Question keys: `tv2-fv26-danmark-1` through `tv2-fv26-danmark-24`
-- **Missing:** Question text strings (only keys exist in data). Must be scraped from the rendered TV2 page.
+- `data/candidates_raw.json` — 918 candidates with full answer data
+- **24 national questions** (keys `tv2-fv26-danmark-1` through `tv2-fv26-danmark-24`), answer scale -2 to +2
+- **60 local questions** — 6 per storkreds (e.g. `tv2-fv26-københavns-1` through `-6`), same scale
+- **10 storkredse:** Bornholms, Fyns, Københavns, Københavns Omegns, Nordjyllands, Nordsjællands, Sjællands, Sydjyllands, Vestjyllands, Østjyllands
+- 824/918 candidates have both national and local answers
+- 689/918 have free-text comments
+- Each candidate has: priorities (top 5 topics), pitch, age, occupation, party
+- **Missing:** Question text strings (only keys exist in data). Must be scraped from the rendered TV2 page — both national and local questions.
 
 ## Architecture overview
 
@@ -49,13 +54,29 @@
 
 ## Matching strategy (Phase 1 — MVP)
 
-Keep it simple: single profile embedding comparison.
+Keep it simple: single profile embedding comparison, but scoped to storkreds.
 
-1. Candidate "profile text" = pitch + answer stances + free-text comments (pre-computed once)
-2. LLM converses with user about political topics (guided by 24 question themes)
-3. After 5-8 exchanges, user's conversation text is embedded with EmbeddingGemma client-side
-4. Cosine similarity against pre-computed candidate embeddings → ranked match list
-5. Top 10 matches shown as candidate cards in the chat thread
+1. **User selects storkreds** before chat begins (dropdown with the 10 storkredse) — this filters candidates and determines which local questions are included
+2. Candidate "profile text" = pitch + national answer stances + local answer stances + free-text comments (pre-computed once, separate embeddings per storkreds-aware profile)
+3. LLM converses with user about political topics (guided by 24 national + 6 local question themes for their storkreds)
+4. After 5-8 exchanges, user's conversation text is embedded with EmbeddingGemma client-side
+5. Cosine similarity against pre-computed candidate embeddings → ranked match list, **filtered to selected storkreds**
+6. Top 10 matches shown as candidate cards in the chat thread
+
+**Storkreds data mapping:**
+
+| Storkreds | Area ID prefix | Candidates | Local key prefix |
+|-----------|---------------|------------|-----------------|
+| Bornholms | bornholms | 21 | `tv2-fv26-bornholms-` |
+| Fyns | fyns | 71 | `tv2-fv26-fyns-` |
+| Københavns | københavns | 98 | `tv2-fv26-københavns-` |
+| Københavns Omegns | københavns-omegns | 79 | `tv2-fv26-københavns-omegns-` |
+| Nordjyllands | nordjyllands | 89 | `tv2-fv26-nordjyllands-` |
+| Nordsjællands | nordsjællands | 71 | `tv2-fv26-nordsjællands-` |
+| Sjællands | sjællands | 122 | `tv2-fv26-sjællands-` |
+| Sydjyllands | sydjyllands | 107 | `tv2-fv26-sydjyllands-` |
+| Vestjyllands | vestjyllands | 77 | `tv2-fv26-vestjyllands-` |
+| Østjyllands | østjyllands | 89 | `tv2-fv26-østjyllands-` |
 
 ---
 
@@ -142,17 +163,21 @@ git commit -m "feat: scaffold Vite + React + TypeScript + Tailwind + assistant-u
 
 **Files:**
 - Create: `scripts/scrape_questions.py`
-- Create: `data/questions.json`
+- Create: `data/questions.json` (national questions)
+- Create: `data/local_questions.json` (local questions per storkreds)
 
 **Step 1: Write scraper script**
 
-Uses `agent-browser` to navigate to a candidate page that has all national answers and extract the rendered question texts from the DOM. The questions are rendered in the HTML but not in the data-props JSON.
+Uses `agent-browser` to navigate to candidate pages and extract rendered question texts from the DOM. Need to visit at least one candidate per storkreds to get all local question texts, plus any candidate for the 24 national questions.
 
 ```python
 #!/usr/bin/env python3
-"""Extract question texts from TV2's kandidattest rendered page.
+"""Extract question texts from TV2's kandidattest rendered pages.
 
-Strategy: Open a candidate page, snapshot the DOM, and find question text elements.
+Strategy:
+1. Open a candidate page, snapshot the DOM, find question text elements
+2. Extract 24 national question texts from any candidate
+3. Visit one candidate per storkreds to extract 6 local questions each
 The exact selectors need to be discovered by inspecting with agent-browser snapshot.
 """
 import subprocess
@@ -167,7 +192,7 @@ def ab(*args, timeout=30):
     )
     return re.sub(r'\x1b\[[0-9;]*m', '', r.stdout.strip())
 
-# Open a candidate page with all national answers (Mette Abildgaard)
+# Open a candidate page with all national answers (Mette Abildgaard, Nordsjællands)
 ab("open", "https://nyheder.tv2.dk/folketingsvalg/kandidat/109366")
 time.sleep(5)
 
@@ -176,30 +201,21 @@ snapshot = ab("snapshot", "-c")
 print(snapshot[:2000])
 
 # Then extract question texts — selectors TBD from snapshot inspection
-# The page renders questions as labeled sections with the question text
+# The page renders questions as labeled sections with question text
 # and the candidate's answer (-2 to +2 scale indicator)
-result = ab("eval", """
-(() => {
-    const questions = {};
-    // Discover question elements — adjust selectors based on snapshot
-    document.querySelectorAll('[class*="question"], [class*="Question"]').forEach(el => {
-        const text = el.textContent.trim();
-        if (text) questions[el.className] = text;
-    });
-    return JSON.stringify(questions);
-})()
-""")
+# Need to map each question key to its rendered text
 
-print(result)
+# ... (discover selectors, extract national + local questions)
+# Repeat for one candidate per storkreds to get all local question texts
+
 ab("close")
 ```
 
-This is a best-effort script — the exact DOM selectors need discovery during implementation by inspecting with `agent-browser snapshot`.
+This is a best-effort script — the exact DOM selectors need discovery during implementation by inspecting with `agent-browser snapshot`. You will need to visit ~10 candidate pages (one per storkreds) to collect all 60 local question texts.
 
 **Step 2: Manually verify and save questions**
 
-Save the final mapping as `data/questions.json`:
-
+Save national questions as `data/questions.json`:
 ```json
 {
   "tv2-fv26-danmark-1": "Danmark bør bruge flere penge på forsvar",
@@ -207,11 +223,25 @@ Save the final mapping as `data/questions.json`:
 }
 ```
 
+Save local questions as `data/local_questions.json`:
+```json
+{
+  "bornholms": {
+    "tv2-fv26-bornholms-1": "...",
+    "tv2-fv26-bornholms-2": "..."
+  },
+  "fyns": {
+    "tv2-fv26-fyns-1": "...",
+    "tv2-fv26-fyns-2": "..."
+  }
+}
+```
+
 **Step 3: Commit**
 
 ```bash
-git add data/questions.json scripts/scrape_questions.py
-git commit -m "feat: extract question texts from TV2 kandidattest"
+git add data/questions.json data/local_questions.json scripts/scrape_questions.py
+git commit -m "feat: extract national and local question texts from TV2"
 ```
 
 ---
@@ -222,21 +252,55 @@ git commit -m "feat: extract question texts from TV2 kandidattest"
 - Create: `scripts/process_candidates.py`
 - Create: `data/candidates.json` (with profileText for embedding generation)
 - Create: `public/candidates.json` (compact, for frontend display)
+- Create: `public/storkredse.json` (storkreds metadata for dropdown)
 
 **Step 1: Write processing script**
 
+Includes both national and local questions in the profile text. The `area` field on each candidate maps to their storkreds. Local questions are included in the profile text based on the candidate's storkreds.
+
 ```python
 #!/usr/bin/env python3
-"""Process raw candidate data into compact format for the web app."""
+"""Process raw candidate data into compact format for the web app.
+Includes national + local question stances in profile text for embedding."""
 import json
+
+STANCE_MAP = {-2: "Helt uenig", -1: "Uenig", 0: "Neutral", 1: "Enig", 2: "Helt enig"}
+
+# Map storkreds area names to local question key prefixes
+AREA_TO_PREFIX = {
+    "Bornholms Storkreds": "tv2-fv26-bornholms-",
+    "Fyns Storkreds": "tv2-fv26-fyns-",
+    "Københavns Storkreds": "tv2-fv26-københavns-",
+    "Københavns Omegns Storkreds": "tv2-fv26-københavns-omegns-",
+    "Nordjyllands Storkreds": "tv2-fv26-nordjyllands-",
+    "Nordsjællands Storkreds": "tv2-fv26-nordsjællands-",
+    "Sjællands Storkreds": "tv2-fv26-sjællands-",
+    "Sydjyllands Storkreds": "tv2-fv26-sydjyllands-",
+    "Vestjyllands Storkreds": "tv2-fv26-vestjyllands-",
+    "Østjyllands Storkreds": "tv2-fv26-østjyllands-",
+}
 
 with open("data/candidates_raw.json") as f:
     raw = json.load(f)
 
 with open("data/questions.json") as f:
-    questions = json.load(f)
+    national_questions = json.load(f)
+
+with open("data/local_questions.json") as f:
+    local_questions_by_area = json.load(f)
+
+def get_local_questions(area_name):
+    """Get local question mapping for a storkreds."""
+    for area, prefix in AREA_TO_PREFIX.items():
+        if area == area_name:
+            # Find matching key in local_questions_by_area
+            slug = prefix.replace("tv2-fv26-", "").rstrip("-")
+            return local_questions_by_area.get(slug, {})
+    return {}
 
 candidates = []
+storkreds_set = set()
+
 for c in raw:
     answers = {}
     profile_parts = []
@@ -244,27 +308,41 @@ for c in raw:
     if c.get("pitch"):
         profile_parts.append(c["pitch"])
 
-    for qkey, qtext in questions.items():
+    # National questions
+    for qkey, qtext in national_questions.items():
         ans = (c.get("answers") or {}).get(qkey, {})
         score = ans.get("answer")
         comment = ans.get("comment", "")
-
         if score is not None:
             answers[qkey] = {"score": score, "comment": comment}
-            stance = {-2: "Helt uenig", -1: "Uenig", 0: "Neutral", 1: "Enig", 2: "Helt enig"}.get(score, "")
-            profile_parts.append(f"{qtext}: {stance}")
+            profile_parts.append(f"{qtext}: {STANCE_MAP.get(score, '')}")
+            if comment:
+                profile_parts.append(comment)
+
+    # Local questions for this candidate's storkreds
+    local_qs = get_local_questions(c.get("area", ""))
+    for qkey, qtext in local_qs.items():
+        ans = (c.get("answers") or {}).get(qkey, {})
+        score = ans.get("answer")
+        comment = ans.get("comment", "")
+        if score is not None:
+            answers[qkey] = {"score": score, "comment": comment}
+            profile_parts.append(f"[Lokalt] {qtext}: {STANCE_MAP.get(score, '')}")
             if comment:
                 profile_parts.append(comment)
 
     if not answers:
-        continue  # Skip candidates with no national answers
+        continue
+
+    area = c.get("area", "")
+    storkreds_set.add(area)
 
     candidates.append({
         "id": c["id"],
         "name": c["name"],
         "party": c["party"],
         "partyLetter": c["partyLetter"],
-        "area": c["area"],
+        "area": area,
         "age": c.get("age"),
         "occupation": c.get("occupation"),
         "pitch": c.get("pitch", ""),
@@ -284,7 +362,17 @@ compact = [{k: v for k, v in c.items() if k != "profileText"} for c in candidate
 with open("public/candidates.json", "w") as f:
     json.dump(compact, f, ensure_ascii=False)
 
+# Storkreds metadata for the frontend dropdown
+storkredse = sorted(storkreds_set)
+storkreds_meta = []
+for s in storkredse:
+    count = sum(1 for c in candidates if c["area"] == s)
+    storkreds_meta.append({"name": s, "candidateCount": count})
+with open("public/storkredse.json", "w") as f:
+    json.dump(storkreds_meta, f, ensure_ascii=False)
+
 print(f"Saved public/candidates.json ({len(compact)} candidates)")
+print(f"Saved public/storkredse.json ({len(storkreds_meta)} storkredse)")
 ```
 
 **Step 2: Run processing**
@@ -297,8 +385,8 @@ python3 scripts/process_candidates.py
 **Step 3: Commit**
 
 ```bash
-git add scripts/process_candidates.py data/candidates.json public/candidates.json
-git commit -m "feat: process candidate data into compact format"
+git add scripts/process_candidates.py data/candidates.json public/candidates.json public/storkredse.json
+git commit -m "feat: process candidate data with national + local questions"
 ```
 
 ---
@@ -338,7 +426,7 @@ with open("data/candidates.json") as f:
     candidates = json.load(f)
 
 texts = [c["profileText"] for c in candidates]
-index_entries = [{"id": c["id"], "name": c["name"], "party": c["party"]} for c in candidates]
+index_entries = [{"id": c["id"], "name": c["name"], "party": c["party"], "area": c["area"]} for c in candidates]
 
 print(f"Generating embeddings for {len(texts)} candidates...")
 
@@ -635,7 +723,7 @@ export interface CandidateMatch {
 interface EmbeddingIndex {
   dim: number;
   count: number;
-  candidates: Array<{ id: number; name: string; party: string }>;
+  candidates: Array<{ id: number; name: string; party: string; area: string }>;
 }
 
 export class EmbeddingManager {
@@ -689,12 +777,15 @@ export class EmbeddingManager {
     });
   }
 
-  findMatches(userEmbedding: number[], topK = 10): CandidateMatch[] {
+  findMatches(userEmbedding: number[], topK = 10, filterArea?: string): CandidateMatch[] {
     if (!this.candidateEmbeddings || !this.index) return [];
     const { dim, count, candidates } = this.index;
     const results: CandidateMatch[] = [];
 
     for (let i = 0; i < count; i++) {
+      // Filter to selected storkreds if specified
+      if (filterArea && candidates[i].area !== filterArea) continue;
+
       let dot = 0;
       for (let d = 0; d < dim; d++) {
         dot += userEmbedding[d] * this.candidateEmbeddings[i * dim + d];
@@ -716,19 +807,66 @@ git commit -m "feat: add EmbeddingManager with cosine similarity matching"
 
 ---
 
-## Task 9: Main App with assistant-ui Thread
+## Task 9: Main App with storkreds selection and assistant-ui Thread
 
 **Files:**
 - Create: `src/App.tsx`
+- Create: `src/components/StorkredsSelector.tsx`
 - Modify: `src/main.tsx`
 
-**Step 1: Write the App component**
+**Step 1: Write the StorkredsSelector component**
 
-Wires together assistant-ui `LocalRuntime`, model loading with progress, and the chat thread.
+Before the chat starts, the user selects their storkreds. This filters candidates and determines which local questions are included in the conversation.
+
+```tsx
+// src/components/StorkredsSelector.tsx
+interface Storkreds {
+  name: string;
+  candidateCount: number;
+}
+
+interface Props {
+  storkredse: Storkreds[];
+  onSelect: (storkreds: string) => void;
+}
+
+export function StorkredsSelector({ storkredse, onSelect }: Props) {
+  return (
+    <div className="flex flex-col items-center justify-center h-full p-6">
+      <h1 className="text-2xl font-bold text-red-700 mb-2">Kandidattest</h1>
+      <p className="text-gray-600 mb-6 text-center max-w-md">
+        Chat med AI om politik og find de kandidater der passer bedst til dine holdninger.
+      </p>
+      <label className="text-sm font-medium text-gray-700 mb-2">
+        Vælg din storkreds
+      </label>
+      <select
+        className="w-72 p-3 border rounded-lg text-gray-900 bg-white shadow-sm"
+        defaultValue=""
+        onChange={(e) => e.target.value && onSelect(e.target.value)}
+      >
+        <option value="" disabled>— Vælg storkreds —</option>
+        {storkredse.map((s) => (
+          <option key={s.name} value={s.name}>
+            {s.name} ({s.candidateCount} kandidater)
+          </option>
+        ))}
+      </select>
+      <p className="text-xs text-gray-400 mt-3">
+        Din storkreds bestemmer hvilke lokale spørgsmål der indgår i samtalen.
+      </p>
+    </div>
+  );
+}
+```
+
+**Step 2: Write the App component**
+
+Two-phase UI: storkreds selection → chat. Models start loading immediately (before selection), so download happens in parallel with the user choosing their storkreds.
 
 ```tsx
 // src/App.tsx
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useCallback } from "react";
 import {
   AssistantRuntimeProvider,
   useLocalRuntime,
@@ -736,13 +874,18 @@ import {
 } from "@assistant-ui/react";
 import { createLLMAdapter } from "./adapters/chat-model-adapter";
 import { EmbeddingManager } from "./lib/embeddings";
+import { StorkredsSelector } from "./components/StorkredsSelector";
+
+interface Storkreds { name: string; candidateCount: number; }
 
 function ModelLoadingOverlay({ items }: { items: Map<string, number> }) {
   if (items.size === 0) return null;
   return (
     <div className="fixed inset-0 bg-black/60 flex flex-col items-center justify-center z-50">
       <h2 className="text-white text-xl font-bold mb-6">Henter AI-modeller...</h2>
-      <p className="text-white/70 text-sm mb-4">Første gang tager det et par minutter. Modellerne caches i browseren.</p>
+      <p className="text-white/70 text-sm mb-4">
+        Første gang tager det et par minutter. Modellerne caches i browseren.
+      </p>
       {[...items.entries()].map(([file, progress]) => (
         <div key={file} className="w-80 mb-3">
           <p className="text-white/80 text-xs truncate">{file}</p>
@@ -763,6 +906,8 @@ export default function App() {
   const embeddingsRef = useRef<EmbeddingManager | null>(null);
   const [progressItems, setProgressItems] = useState<Map<string, number>>(new Map());
   const [modelsReady, setModelsReady] = useState(false);
+  const [selectedStorkreds, setSelectedStorkreds] = useState<string | null>(null);
+  const [storkredse, setStorkredse] = useState<Storkreds[]>([]);
 
   // Create LLM worker once
   if (!llmWorkerRef.current) {
@@ -772,14 +917,9 @@ export default function App() {
     );
   }
 
-  // Track download progress from both workers
-  const handleProgress = (data: any) => {
+  const handleProgress = useCallback((data: any) => {
     if (data.status === "progress" && data.file) {
-      setProgressItems((prev) => {
-        const next = new Map(prev);
-        next.set(data.file, data.progress ?? 0);
-        return next;
-      });
+      setProgressItems((prev) => new Map(prev).set(data.file, data.progress ?? 0));
     }
     if (data.status === "done" && data.file) {
       setProgressItems((prev) => {
@@ -788,17 +928,19 @@ export default function App() {
         return next;
       });
     }
-  };
+  }, []);
 
   useEffect(() => {
+    // Load storkreds list immediately
+    fetch("/storkredse.json").then(r => r.json()).then(setStorkredse);
+
+    // Start downloading models in parallel with user selecting storkreds
     llmWorkerRef.current!.addEventListener("message", (e) => handleProgress(e.data));
 
     async function loadModels() {
-      // Load embedding model + pre-computed embeddings
       embeddingsRef.current = new EmbeddingManager(handleProgress);
       await embeddingsRef.current.load();
 
-      // Load LLM
       await new Promise<void>((resolve) => {
         const handler = (e: MessageEvent) => {
           if (e.data.type === "ready") {
@@ -814,18 +956,34 @@ export default function App() {
     }
 
     loadModels();
-  }, []);
+  }, [handleProgress]);
 
   const adapter = createLLMAdapter(llmWorkerRef.current);
   const runtime = useLocalRuntime(adapter);
 
+  // Phase 1: Storkreds selection (models download in background)
+  if (!selectedStorkreds) {
+    return (
+      <>
+        <ModelLoadingOverlay items={progressItems} />
+        <div className="h-dvh flex flex-col max-w-2xl mx-auto">
+          <StorkredsSelector
+            storkredse={storkredse}
+            onSelect={setSelectedStorkreds}
+          />
+        </div>
+      </>
+    );
+  }
+
+  // Phase 2: Chat (models may still be loading)
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ModelLoadingOverlay items={progressItems} />
       <div className="h-dvh flex flex-col max-w-2xl mx-auto">
-        <header className="px-4 py-3 border-b">
+        <header className="px-4 py-3 border-b flex items-baseline gap-3">
           <h1 className="text-xl font-bold text-red-700">Kandidattest</h1>
-          <p className="text-sm text-gray-500">Chat med AI om politik — find din kandidat</p>
+          <span className="text-sm text-gray-500">{selectedStorkreds}</span>
         </header>
         <div className="flex-1 overflow-hidden">
           <Thread />
@@ -836,7 +994,7 @@ export default function App() {
 }
 ```
 
-**Step 2: Wire up main.tsx**
+**Step 3: Wire up main.tsx**
 
 ```tsx
 // src/main.tsx
@@ -852,64 +1010,84 @@ createRoot(document.getElementById("root")!).render(
 );
 ```
 
-**Step 3: Commit**
+**Step 4: Commit**
 
 ```bash
-git add src/App.tsx src/main.tsx
-git commit -m "feat: wire App with assistant-ui Thread, model loading, and progress overlay"
+git add src/App.tsx src/components/StorkredsSelector.tsx src/main.tsx
+git commit -m "feat: add storkreds selection and wire App with assistant-ui Thread"
 ```
 
 ---
 
-## Task 10: System prompt and conversation flow
+## Task 10: System prompt with national + local questions
 
 **Files:**
 - Create: `src/lib/system-prompt.ts`
 - Create: `public/questions.json` (copy from data/)
+- Create: `public/local_questions.json` (copy from data/)
 
 **Step 1: Write the system prompt builder**
 
-The system prompt instructs Qwen3-0.6B to conduct a natural Danish conversation about the 24 political topics and signal when it has enough information.
+The system prompt instructs Qwen3-0.6B to conduct a natural Danish conversation. It includes both the 24 national questions and the 6 local questions for the user's selected storkreds.
 
 ```typescript
 // src/lib/system-prompt.ts
 
-export function buildSystemPrompt(questions: Record<string, string>): string {
-  const questionList = Object.values(questions)
+export function buildSystemPrompt(
+  nationalQuestions: Record<string, string>,
+  localQuestions: Record<string, string>,
+  storkredsName: string,
+): string {
+  const nationalList = Object.values(nationalQuestions)
+    .map((q, i) => `${i + 1}. ${q}`)
+    .join("\n");
+
+  const localList = Object.values(localQuestions)
     .map((q, i) => `${i + 1}. ${q}`)
     .join("\n");
 
   return `Du er en venlig politisk rådgiver der hjælper danske vælgere med at finde deres kandidat til folketingsvalget 2026.
 
-Du skal føre en naturlig samtale på dansk om politiske emner. Dæk disse emner gennem samtalen:
-${questionList}
+Brugeren bor i ${storkredsName}. Du skal føre en naturlig samtale på dansk om politiske emner.
+
+NATIONALE EMNER (dæk mindst 4-5 af disse):
+${nationalList}
+
+LOKALE EMNER FOR ${storkredsName.toUpperCase()} (dæk mindst 2-3 af disse):
+${localList}
 
 Regler:
 - Stil ét spørgsmål ad gangen, i en naturlig rækkefølge
 - Brug et venligt, uformelt sprog — som en ven der spørger om dine holdninger
 - Opsummer kort brugerens holdning inden du går videre til næste emne
-- Du behøver ikke dække alle 24 emner — 5-8 udvekslinger er nok
+- Start med nationale emner, og vævle de lokale emner ind naturligt
+- Du behøver ikke dække alle emner — 6-10 udvekslinger er nok
 - Når du har nok information, skriv præcis: [KLAR TIL MATCH]
 - Svar ALTID på dansk
-- Start med at byde velkommen og stille dit første spørgsmål`;
+- Start med at byde velkommen, nævn at du også vil spørge om lokale emner for ${storkredsName}, og stil dit første spørgsmål`;
 }
 ```
 
 **Step 2: Integrate system prompt into the adapter**
 
-Update the `ChatModelAdapter` to prepend the system prompt to the message history. The system prompt is loaded from `questions.json` at startup.
+Update the `ChatModelAdapter` (or App orchestration) to:
+1. Load both `questions.json` and `local_questions.json`
+2. Look up the local questions for the selected storkreds
+3. Build the system prompt with both national and local questions
+4. Prepend to message history sent to the LLM worker
 
-**Step 3: Ensure `public/questions.json` exists**
+**Step 3: Copy data files to public/**
 
 ```bash
 cp data/questions.json public/questions.json
+cp data/local_questions.json public/local_questions.json
 ```
 
 **Step 4: Commit**
 
 ```bash
-git add src/lib/system-prompt.ts public/questions.json
-git commit -m "feat: add system prompt for Danish political conversation flow"
+git add src/lib/system-prompt.ts public/questions.json public/local_questions.json
+git commit -m "feat: add system prompt with national + local storkreds questions"
 ```
 
 ---
@@ -1008,8 +1186,10 @@ export function CandidateResults({ matches, candidates }: Props) {
 Add a mechanism to detect `[KLAR TIL MATCH]` in LLM output, then:
 1. Concatenate all user messages from the conversation
 2. Embed with EmbeddingGemma via the embedding worker
-3. Run cosine similarity against pre-computed candidate embeddings
+3. Run cosine similarity against pre-computed candidate embeddings, **filtered to candidates in the selected storkreds**
 4. Display `CandidateResults` below the chat
+
+The `EmbeddingManager.findMatches()` method should accept an optional `filterArea` parameter to only compare against candidates from the user's storkreds.
 
 **Step 3: Commit**
 
@@ -1096,13 +1276,17 @@ Open http://localhost:5173 in Chrome (WebGPU required).
 
 **Step 2: Verify:**
 - [ ] WebGPU check runs — shows fallback on unsupported browsers
+- [ ] Storkreds selector shows all 10 storkredse with candidate counts
+- [ ] Models download in background while user selects storkreds
 - [ ] Loading overlay shows with per-file progress bars
 - [ ] Both models download and initialize (LLM ~400MB, Embeddings ~175MB)
 - [ ] assistant-ui Thread renders with streaming token output
-- [ ] LLM greets user in Danish and asks first question
+- [ ] LLM greets user in Danish and mentions local questions for their storkreds
 - [ ] User can chat naturally about political views
-- [ ] After 5-8 exchanges, LLM signals `[KLAR TIL MATCH]`
-- [ ] Candidate matches appear with scores and party colors
+- [ ] LLM asks both national and local questions
+- [ ] After 6-10 exchanges, LLM signals `[KLAR TIL MATCH]`
+- [ ] Candidate matches appear filtered to selected storkreds
+- [ ] Results show scores and party colors
 - [ ] Works on mobile viewport (responsive layout)
 
 **Step 3: Fix any issues found**
@@ -1117,10 +1301,9 @@ Not part of this plan, but noted for future iterations:
 
 1. **Per-question embeddings** — more granular matching by embedding each question/answer pair separately
 2. **Candidate detail cards** — photos (from TV2 CDN), full pitch text, expandable answer details
-3. **Local question support** — let user select storkreds for local question matching
-4. **Share results** — shareable URL with encoded match results
-5. **PWA + offline** — service worker for offline use after initial model download
-6. **Model caching UX** — show "cached" indicator on return visits (Cache API/IndexedDB)
-7. **Deploy** — Cloudflare Pages with proper caching headers for large model files
-8. **WASM fallback** — fall back to WASM backend for browsers without WebGPU (slower but universal)
-9. **Streaming match explanation** — after matches are found, have the LLM explain why the top candidates match
+3. **Share results** — shareable URL with encoded match results
+4. **PWA + offline** — service worker for offline use after initial model download
+5. **Model caching UX** — show "cached" indicator on return visits (Cache API/IndexedDB)
+6. **Deploy** — Cloudflare Pages with proper caching headers for large model files
+7. **WASM fallback** — fall back to WASM backend for browsers without WebGPU (slower but universal)
+8. **Streaming match explanation** — after matches are found, have the LLM explain why the top candidates match
