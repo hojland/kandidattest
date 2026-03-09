@@ -200,12 +200,14 @@ export default function App() {
 
   const handleProgress = useCallback(
     (data: { status?: string; file?: string; progress?: number }) => {
-      if (data.status === "progress" && data.file) {
+      if (!data.file) return;
+      if (data.status === "initiate" || data.status === "download") {
+        setProgressItems((prev) => new Map(prev).set(data.file!, 0));
+      } else if (data.status === "progress") {
         setProgressItems(
           (prev) => new Map(prev).set(data.file!, data.progress ?? 0),
         );
-      }
-      if (data.status === "done" && data.file) {
+      } else if (data.status === "done") {
         setProgressItems((prev) => {
           const next = new Map(prev);
           next.delete(data.file!);
@@ -238,19 +240,33 @@ export default function App() {
       );
 
       async function loadModels() {
-        embeddingsRef.current = new EmbeddingManager(handleProgress);
-        await embeddingsRef.current.load();
+        try {
+          embeddingsRef.current = new EmbeddingManager(handleProgress);
+          await embeddingsRef.current.load();
+          console.log("[APP] Embedding model loaded");
+        } catch (e) {
+          console.error("[APP] Embedding model failed:", e);
+        }
 
-        await new Promise<void>((resolve) => {
-          const handler = (e: MessageEvent) => {
-            if (e.data.type === "ready") {
-              llmWorkerRef.current!.removeEventListener("message", handler);
-              resolve();
-            }
-          };
-          llmWorkerRef.current!.addEventListener("message", handler);
-          llmWorkerRef.current!.postMessage({ type: "load" });
-        });
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const handler = (e: MessageEvent) => {
+              if (e.data.type === "ready") {
+                llmWorkerRef.current!.removeEventListener("message", handler);
+                resolve();
+              }
+            };
+            llmWorkerRef.current!.addEventListener("message", handler);
+            llmWorkerRef.current!.addEventListener("error", (e) => {
+              console.error("[APP] LLM worker error:", e);
+              reject(e);
+            });
+            llmWorkerRef.current!.postMessage({ type: "load" });
+          });
+          console.log("[APP] LLM model loaded");
+        } catch (e) {
+          console.error("[APP] LLM model failed:", e);
+        }
 
         setModelsReady(true);
       }
@@ -269,13 +285,13 @@ export default function App() {
         fetch("/local_questions.json").then((r) => r.json()),
       ]);
       const localMap = allLocal as Record<string, Record<string, string>>;
-      const storkredsSlug = selectedStorkreds
+      const storkredsSlug = selectedStorkreds!
         .replace(/\s*storkreds$/i, "")
         .toLowerCase()
         .replace(/\s+/g, "-");
       const localForStorkreds = localMap[storkredsSlug] ?? {};
       setSystemPrompt(
-        buildSystemPrompt(national, localForStorkreds, selectedStorkreds),
+        buildSystemPrompt(national, localForStorkreds, selectedStorkreds!),
       );
     }
 

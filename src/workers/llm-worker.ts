@@ -7,7 +7,7 @@ class LLMPipeline {
 
   static async getInstance(progressCallback?: (data: unknown) => void) {
     if (!this.instance) {
-      this.instance = await pipeline("text-generation", "onnx-community/Qwen3-0.6B", {
+      this.instance = await pipeline("text-generation", "onnx-community/Qwen3-0.6B-ONNX", {
         dtype: "q4f16",
         device: "webgpu",
         progress_callback: progressCallback,
