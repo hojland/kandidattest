@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Extract question texts from TV2 using positional matching within topic sections."""
+
 import json
 from playwright.sync_api import sync_playwright
 
@@ -89,9 +90,12 @@ with sync_playwright() as p:
         # Local questions: map positionally to keys
         local_prefix = f"tv2-fv26-{slug}-"
         local_keys = sorted(
-            [k for k in (raw_by_id[candidate_id].get("answers") or {})
-             if k.startswith(local_prefix) and (raw_by_id[candidate_id]["answers"][k].get("answer") is not None)],
-            key=lambda x: int(x.split("-")[-1])
+            [
+                k
+                for k in (raw_by_id[candidate_id].get("answers") or {})
+                if k.startswith(local_prefix) and (raw_by_id[candidate_id]["answers"][k].get("answer") is not None)
+            ],
+            key=lambda x: int(x.split("-")[-1]),
         )
 
         # The storkreds section shows local questions in order
@@ -128,7 +132,7 @@ with sync_playwright() as p:
     # Get national keys sorted by number
     national_keys = sorted(
         [k for k in answers if k.startswith("tv2-fv26-danmark-") and answers[k].get("answer") is not None],
-        key=lambda x: int(x.split("-")[-1])
+        key=lambda x: int(x.split("-")[-1]),
     )
 
     print(f"\nNational: {len(national_questions_ordered)} texts, {len(national_keys)} keys")
@@ -245,7 +249,7 @@ with sync_playwright() as p:
 
     print(f"\n=== RESULTS ===")
     print(f"National: {len(national_questions)}/24")
-    for k in sorted(national_questions, key=lambda x: int(x.split('-')[-1])):
+    for k in sorted(national_questions, key=lambda x: int(x.split("-")[-1])):
         print(f"  {k}: {national_questions[k]}")
 
     print(f"\nLocal questions per storkreds:")
@@ -254,7 +258,7 @@ with sync_playwright() as p:
         qs = local_questions_by_slug[s]
         total_local += len(qs)
         print(f"  {s}: {len(qs)}/6")
-        for k in sorted(qs, key=lambda x: int(x.split('-')[-1])):
+        for k in sorted(qs, key=lambda x: int(x.split("-")[-1])):
             print(f"    {k}: {qs[k][:80]}")
 
     # Save

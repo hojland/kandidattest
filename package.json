@@ -10,9 +10,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.58",
+    "@ai-sdk/google": "^3.0.43",
+    "@ai-sdk/openai": "^3.0.41",
     "@assistant-ui/react": "^0.12.16",
     "@huggingface/transformers": "^3.8.1",
     "@tailwindcss/vite": "^4.2.1",
+    "ai": "^6.0.116",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "tailwindcss": "^4.2.1"

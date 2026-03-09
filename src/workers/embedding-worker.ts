@@ -10,7 +10,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
     tokenizer = await AutoTokenizer.from_pretrained("onnx-community/embeddinggemma-300m-ONNX");
     model = await AutoModel.from_pretrained("onnx-community/embeddinggemma-300m-ONNX", {
       dtype: "q4f16",
-      device: "webgpu",
+      device: "wasm",
       progress_callback: (data: unknown) => {
         self.postMessage({ type: "progress", ...(data as Record<string, unknown>) });
       },
@@ -38,11 +38,13 @@ self.addEventListener("message", async (event: MessageEvent) => {
       embedding[d] = sum / seqLen;
     }
 
-    // L2 normalize
+    // L2 normalize (guard against zero-norm)
     let norm = 0;
     for (let d = 0; d < dim; d++) norm += embedding[d] * embedding[d];
     norm = Math.sqrt(norm);
-    for (let d = 0; d < dim; d++) embedding[d] /= norm;
+    if (norm > 0) {
+      for (let d = 0; d < dim; d++) embedding[d] /= norm;
+    }
 
     self.postMessage({ type: "embedding", embedding: Array.from(embedding), id });
   }
