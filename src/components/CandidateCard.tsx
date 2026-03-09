@@ -105,6 +105,14 @@ Skriv 3-5 korte punkter på dansk om de vigtigste enigheder og uenigheder mellem
           abortSignal: controller.signal,
           maxOutputTokens: 1024,
           temperature: 0.5,
+          providerOptions: {
+            anthropic: {
+              thinking: { type: "enabled", budgetTokens: 2048 },
+            },
+            google: {
+              thinkingConfig: { thinkingBudget: 2048 },
+            },
+          },
         });
 
         let accumulated = "";
