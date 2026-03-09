@@ -1,0 +1,59 @@
+[project]
+name = "kandidattest-scripts"
+version = "0.1.0"
+description = "Data processing scripts for Kandidattest"
+authors = [{ name = "Martin Højland Hansen", email = "hojland93@gmail.com" }]
+requires-python = ">=3.12,<4.0"
+dependencies = [
+    "transformers>=4.30.0",
+    "torch>=2.0.0",
+    "numpy>=2.0.0",
+    "playwright>=1.40.0",
+    "python-dotenv>=1.2.2",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11.5",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+fix = true
+
+[tool.ruff.lint]
+select = [
+    "YTT",
+    "S",
+    "B",
+    "A",
+    "C4",
+    "T10",
+    "SIM",
+    "I",
+    "C90",
+    "E", "W",
+    "F",
+    "PGH",
+    "UP",
+    "RUF",
+    "TRY",
+]
+ignore = [
+    "E501",
+    "E731",
+    "TRY003",
+    "TRY300",
+    "TRY301",
+    "B008",
+    "B904",
+    "B905",
+]
+unfixable = ["F401"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["S603", "S607"]
+
+[tool.ruff.format]
+preview = true

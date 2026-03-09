@@ -4,3 +4,8 @@ data/candidates_raw.json
 .DS_Store
 *.local
 .worktrees/
+.venv/
+uv.lock
+data/candidates.json
+__pycache__/
+.env
