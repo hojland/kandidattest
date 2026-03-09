@@ -9,10 +9,13 @@ import {
   useThreadRuntime,
 } from "@assistant-ui/react";
 import { createLLMAdapter } from "./adapters/chat-model-adapter";
+import { createApiAdapter } from "./adapters/api-adapter";
 import { EmbeddingManager } from "./lib/embeddings";
 import type { CandidateMatch } from "./lib/embeddings";
-import { buildSystemPrompt } from "./lib/system-prompt";
+import { buildLocalPrompt, buildApiPrompt } from "./lib/system-prompt";
 import { checkWebGPU } from "./lib/webgpu";
+import type { Provider } from "./lib/provider";
+import { ProviderSelector } from "./components/ProviderSelector";
 import { StorkredsSelector } from "./components/StorkredsSelector";
 import { CandidateResults } from "./components/CandidateResults";
 import { ChoiceToolUI } from "./components/ChoiceButtons";
@@ -65,7 +68,6 @@ function TextPart() {
   const isThinking = part.text.includes("💭 Tænker...");
 
   if (isThinking) {
-    // Split into visible text + thinking indicator
     const visibleText = part.text.replace(/\n*💭 Tænker\.\.\.$/, "").trim();
     return (
       <>
@@ -120,7 +122,7 @@ function ChatThread() {
       <ThreadPrimitive.Viewport className="flex-1 overflow-y-auto p-4">
         <ThreadPrimitive.Empty>
           <p className="text-center text-gray-400 mt-8">
-            Modellen indlæses...
+            Klar til at starte...
           </p>
         </ThreadPrimitive.Empty>
         <ThreadPrimitive.Messages
@@ -134,6 +136,24 @@ function ChatThread() {
       <Composer />
     </ThreadPrimitive.Root>
   );
+}
+
+// --- Auto-start: sends a hidden trigger to make the model speak first ---
+
+function AutoStart({ ready }: { ready: boolean }) {
+  const threadRuntime = useThreadRuntime();
+  const started = useRef(false);
+
+  useEffect(() => {
+    if (!ready || started.current) return;
+    started.current = true;
+    threadRuntime.append({
+      role: "user",
+      content: [{ type: "text", text: "Hej! Start venligst samtalen." }],
+    });
+  }, [ready, threadRuntime]);
+
+  return null;
 }
 
 // --- Match detection ---
@@ -191,6 +211,7 @@ function MatchDetector({
 export default function App() {
   const llmWorkerRef = useRef<Worker | null>(null);
   const embeddingsRef = useRef<EmbeddingManager | null>(null);
+  const [provider, setProvider] = useState<Provider | null>(null);
   const [progressItems, setProgressItems] = useState<Map<string, number>>(
     new Map(),
   );
@@ -199,20 +220,12 @@ export default function App() {
     null,
   );
   const [storkredse, setStorkredse] = useState<Storkreds[]>([]);
-  const [webgpuError, setWebgpuError] = useState<string | null>(null);
+  const [webgpuSupported, setWebgpuSupported] = useState(true);
   const [matches, setMatches] = useState<CandidateMatch[] | null>(null);
   const [candidates, setCandidates] = useState<Map<number, CandidateData>>(
     new Map(),
   );
   const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
-
-  // Create LLM worker once
-  if (!llmWorkerRef.current) {
-    llmWorkerRef.current = new Worker(
-      new URL("./workers/llm-worker.ts", import.meta.url),
-      { type: "module" },
-    );
-  }
 
   const handleProgress = useCallback(
     (data: { status?: string; file?: string; progress?: number }) => {
@@ -234,66 +247,79 @@ export default function App() {
     [],
   );
 
+  // Check WebGPU + load static data on mount
   useEffect(() => {
     checkWebGPU().then((result) => {
       if (!result.supported) {
-        setWebgpuError(result.reason ?? "WebGPU ikke understøttet.");
-        return;
+        setWebgpuSupported(false);
+      }
+    });
+
+    fetch("/storkredse.json")
+      .then((r) => r.json())
+      .then(setStorkredse);
+
+    fetch("/candidates.json")
+      .then((r) => r.json())
+      .then((data: CandidateData[]) => {
+        setCandidates(new Map(data.map((c) => [c.id, c])));
+      });
+  }, []);
+
+  // Load models when provider is selected
+  useEffect(() => {
+    if (!provider) return;
+
+    async function loadModels() {
+      // Always load embeddings
+      try {
+        embeddingsRef.current = new EmbeddingManager(handleProgress);
+        await embeddingsRef.current.load();
+        console.log("[APP] Embedding model loaded");
+      } catch (e) {
+        console.error("[APP] Embedding model failed:", e);
       }
 
-      fetch("/storkredse.json")
-        .then((r) => r.json())
-        .then(setStorkredse);
-
-      fetch("/candidates.json")
-        .then((r) => r.json())
-        .then((data: CandidateData[]) => {
-          setCandidates(new Map(data.map((c) => [c.id, c])));
-        });
-
-      llmWorkerRef.current!.addEventListener("message", (e) =>
-        handleProgress(e.data),
-      );
-
-      async function loadModels() {
+      // Only load LLM worker for local provider
+      if (provider!.type === "local") {
         try {
-          embeddingsRef.current = new EmbeddingManager(handleProgress);
-          await embeddingsRef.current.load();
-          console.log("[APP] Embedding model loaded");
-        } catch (e) {
-          console.error("[APP] Embedding model failed:", e);
-        }
+          const worker = new Worker(
+            new URL("./workers/llm-worker.ts", import.meta.url),
+            { type: "module" },
+          );
+          llmWorkerRef.current = worker;
 
-        try {
+          worker.addEventListener("message", (e) => handleProgress(e.data));
+
           await new Promise<void>((resolve, reject) => {
             const handler = (e: MessageEvent) => {
               if (e.data.type === "ready") {
-                llmWorkerRef.current!.removeEventListener("message", handler);
+                worker.removeEventListener("message", handler);
                 resolve();
               }
             };
-            llmWorkerRef.current!.addEventListener("message", handler);
-            llmWorkerRef.current!.addEventListener("error", (e) => {
+            worker.addEventListener("message", handler);
+            worker.addEventListener("error", (e) => {
               console.error("[APP] LLM worker error:", e);
               reject(e);
             });
-            llmWorkerRef.current!.postMessage({ type: "load" });
+            worker.postMessage({ type: "load" });
           });
           console.log("[APP] LLM model loaded");
         } catch (e) {
           console.error("[APP] LLM model failed:", e);
         }
-
-        setModelsReady(true);
       }
 
-      loadModels();
-    });
-  }, [handleProgress]);
+      setModelsReady(true);
+    }
+
+    loadModels();
+  }, [provider, handleProgress]);
 
   // Load system prompt when storkreds is selected
   useEffect(() => {
-    if (!selectedStorkreds) return;
+    if (!selectedStorkreds || !provider) return;
 
     async function loadPrompt() {
       const [national, allLocal] = await Promise.all([
@@ -306,15 +332,33 @@ export default function App() {
         .toLowerCase()
         .replace(/\s+/g, "-");
       const localForStorkreds = localMap[storkredsSlug] ?? {};
+
+      const promptBuilder =
+        provider!.type === "api" ? buildApiPrompt : buildLocalPrompt;
       setSystemPrompt(
-        buildSystemPrompt(national, localForStorkreds, selectedStorkreds!),
+        promptBuilder(national, localForStorkreds, selectedStorkreds!),
       );
     }
 
     loadPrompt();
-  }, [selectedStorkreds]);
+  }, [selectedStorkreds, provider]);
 
-  const adapter = createLLMAdapter(llmWorkerRef.current, systemPrompt ?? "");
+  // ProviderSelector handles sessionStorage internally
+  const handleProviderSelect = useCallback((p: Provider) => {
+    setProvider(p);
+  }, []);
+
+  // Build adapter based on provider type
+  const adapter =
+    provider?.type === "api"
+      ? createApiAdapter(
+          provider.baseUrl,
+          provider.apiKey,
+          provider.model,
+          systemPrompt ?? "",
+        )
+      : createLLMAdapter(llmWorkerRef.current!, systemPrompt ?? "");
+
   const runtime = useLocalRuntime(adapter);
 
   const handleMatchDetected = useCallback(
@@ -332,23 +376,27 @@ export default function App() {
     [modelsReady, selectedStorkreds],
   );
 
-  if (webgpuError) {
+  // --- Render screens ---
+
+  // Screen 1: Provider selection
+  if (!provider) {
     return (
-      <div className="flex items-center justify-center h-dvh p-6">
-        <div className="text-center max-w-md">
-          <h1 className="text-2xl font-bold text-red-700 mb-4">
-            Kandidattest
-          </h1>
-          <p className="text-gray-600">{webgpuError}</p>
-        </div>
+      <div className="h-dvh flex flex-col max-w-2xl mx-auto">
+        <ProviderSelector
+          webgpuSupported={webgpuSupported}
+          onSelect={handleProviderSelect}
+        />
       </div>
     );
   }
 
+  // Screen 2: Storkreds selection
   if (!selectedStorkreds) {
     return (
       <>
-        <ModelLoadingOverlay items={progressItems} />
+        {provider.type === "local" && (
+          <ModelLoadingOverlay items={progressItems} />
+        )}
         <div className="h-dvh flex flex-col max-w-2xl mx-auto">
           <StorkredsSelector
             storkredse={storkredse}
@@ -359,18 +407,21 @@ export default function App() {
     );
   }
 
+  // Screen 3: Chat
+  const chatReady = modelsReady && !!systemPrompt;
+
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <ModelLoadingOverlay items={progressItems} />
+      {provider.type === "local" && (
+        <ModelLoadingOverlay items={progressItems} />
+      )}
       <div className="h-dvh flex flex-col max-w-2xl mx-auto">
         <header className="px-4 py-3 border-b flex items-baseline gap-3">
           <h1 className="text-xl font-bold text-red-700">Kandidattest</h1>
           <span className="text-sm text-gray-500">{selectedStorkreds}</span>
-          {!modelsReady && (
-            <span className="text-xs text-amber-600 ml-auto">
-              Modeller indlæses...
-            </span>
-          )}
+          <span className="text-xs text-gray-400 ml-auto">
+            {provider.type === "api" ? provider.model : "Qwen3 1.7B (lokal)"}
+          </span>
         </header>
         <div className="flex-1 overflow-hidden">
           <ChatThread />
@@ -382,6 +433,7 @@ export default function App() {
         )}
       </div>
       <ChoiceToolUI />
+      <AutoStart ready={chatReady} />
       <MatchDetector
         onMatch={handleMatchDetected}
         matchTriggered={matches !== null}
