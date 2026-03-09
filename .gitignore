@@ -3,3 +3,4 @@ dist/
 data/candidates_raw.json
 .DS_Store
 *.local
+.worktrees/
