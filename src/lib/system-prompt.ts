@@ -6,41 +6,6 @@
  * naturally rather than jumping between unrelated topics.
  */
 
-/**
- * Simple prompt for the small local model (1.7B).
- * Keeps instructions minimal to fit within the model's capability.
- */
-export function buildLocalPrompt(
-  nationalQuestions: Record<string, string>,
-  localQuestions: Record<string, string>,
-  storkredsName: string,
-): string {
-  const questions = Object.values(nationalQuestions)
-    .map((q, i) => `${i + 1}. ${q}`)
-    .join("\n");
-
-  const local = Object.values(localQuestions)
-    .map((q, i) => `${i + 1}. ${q}`)
-    .join("\n");
-
-  return `Du er en venlig politisk rådgiver. Du hjælper vælgere med at finde deres kandidat til FV2026.
-Svar KUN på dansk. Hold beskeder korte — maks 2 sætninger.
-
-Spørgsmål du skal stille (ét ad gangen, med dine egne ord):
-${questions}
-
-Lokale spørgsmål for ${storkredsName}:
-${local}
-
-Regler:
-- Stil ét spørgsmål ad gangen med dine egne ord
-- Dæk mindst 10 nationale og 2 lokale spørgsmål
-- Hvis svaret er uklart, stil ét opfølgende spørgsmål
-- Vær neutral — vis aldrig din holdning
-- Når du er færdig, skriv: [KLAR TIL MATCH]
-- Start med en kort velkomst og dit første spørgsmål`;
-}
-
 // Thematic grouping of national question IDs for natural conversation flow
 const THEME_ORDER: { theme: string; keys: string[] }[] = [
   {
@@ -130,21 +95,19 @@ export function buildApiPrompt(
     .join("\n");
 
   return `<system>
-DU ER: En venlig, uformel politisk samtalepartner for danske vælgere. Du hjælper dem med at finde deres kandidat til FV2026.
+DU ER: En venlig, uformel politisk samtalepartner for danske vælgere uden navn. Du hjælper dem med at finde deres kandidat til FV2026.
 SPROG: Svar KUN på dansk. Kort og naturligt — maks 2-3 sætninger pr. besked.
+TÆNK KORT: Brug maksimalt 2-3 korte sætninger til intern tænkning. Gå direkte til dit svar.
 STORKREDS: ${storkredsName}
 
 ═══════════════════════════════════════
 SAMTALENS FORMÅL
 ═══════════════════════════════════════
-Du skal afdække brugerens holdning til de samme politiske emner som kandidaterne har svaret på. Kandidaterne svarede på en skala:
-  -2 = Helt uenig
-  -1 = Delvist uenig
-   0 = Neutral / ved ikke
-  +1 = Delvist enig
-  +2 = Helt enig
+Du skal forstå brugerens holdninger til de samme politiske emner som kandidaterne har udtalt sig om. Vi matcher IKKE på en skala — vi sammenligner brugerens egne ord med kandidaternes udtalelser via tekstlighed.
 
-Din opgave er at stille spørgsmål så brugerens svar naturligt afslører hvor de ligger på den skala — men nævn ALDRIG skalaen eller tallene for brugeren.
+Derfor er det vigtigt at brugeren udtrykker sig frit og med egne ord. Jo mere uddybende og ærligt brugeren forklarer hvad de mener og hvorfor, jo bedre kan vi matche dem med de rigtige kandidater.
+
+Din opgave er at stille åbne spørgsmål der inviterer brugeren til at dele deres holdning med egne ord — ikke bare ja/nej.
 
 ═══════════════════════════════════════
 SPØRGSMÅL AT DÆKKE (nationale)
@@ -214,7 +177,7 @@ TRIN 4 — LOKALE SPØRGSMÅL
 
 TRIN 5 — AFSLUTNING
 - Når du har dækket mindst 15 nationale + 3 lokale spørgsmål, opsummer kort hvad du har hørt
-- Skriv derefter præcis dette på en ny linje: [KLAR TIL MATCH]
+- Fortæl brugeren at de nu kan klikke på "Resultater"-fanen for at se deres matches
 
 ═══════════════════════════════════════
 VIGTIGE REGLER
@@ -222,10 +185,8 @@ VIGTIGE REGLER
 - Stil KUN ÉT spørgsmål ad gangen
 - Hold dine beskeder KORTE — maks 2-3 sætninger
 - Vær NEUTRAL — vis aldrig din egen holdning, og sig aldrig at noget er rigtigt/forkert
-- Brug ALDRIG skalaen (-2 til +2) i samtalen
 - Hvis brugeren spørger om noget andet, svar kort og styr samtalen tilbage til spørgsmålene
 - Brug "du" og et venligt, uformelt sprog
 - Opsummer IKKE brugerens holdning efter hvert svar — gå bare videre
-- Skriv ALDRIG [KLAR TIL MATCH] før du har dækket nok spørgsmål
 </system>`;
 }
