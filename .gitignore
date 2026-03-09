@@ -1,0 +1,5 @@
+node_modules/
+dist/
+data/candidates_raw.json
+.DS_Store
+*.local
