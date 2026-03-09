@@ -263,23 +263,23 @@ export default function App() {
   useEffect(() => {
     if (!selectedStorkreds) return;
 
-    Promise.all([
-      fetch("/questions.json").then((r) => r.json()),
-      fetch("/local_questions.json").then((r) => r.json()),
-    ]).then(([national, allLocal]) => {
+    async function loadPrompt() {
+      const [national, allLocal] = await Promise.all([
+        fetch("/questions.json").then((r) => r.json()),
+        fetch("/local_questions.json").then((r) => r.json()),
+      ]);
+      const localMap = allLocal as Record<string, Record<string, string>>;
       const storkredsSlug = selectedStorkreds
+        .replace(/\s*storkreds$/i, "")
         .toLowerCase()
         .replace(/\s+/g, "-");
-      const localForStorkreds: Record<string, string> = {};
-      for (const [key, text] of Object.entries(allLocal)) {
-        if (key.includes(storkredsSlug)) {
-          localForStorkreds[key] = text as string;
-        }
-      }
+      const localForStorkreds = localMap[storkredsSlug] ?? {};
       setSystemPrompt(
         buildSystemPrompt(national, localForStorkreds, selectedStorkreds),
       );
-    });
+    }
+
+    loadPrompt();
   }, [selectedStorkreds]);
 
   const adapter = createLLMAdapter(llmWorkerRef.current, systemPrompt ?? "");
