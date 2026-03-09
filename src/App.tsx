@@ -8,16 +8,13 @@ import {
   useMessagePartText,
   useThreadRuntime,
 } from "@assistant-ui/react";
-import { createLLMAdapter } from "./adapters/chat-model-adapter";
-import { createApiAdapter } from "./adapters/api-adapter";
+import { createAISDKAdapter } from "./adapters/ai-sdk-adapter";
 import { EmbeddingManager } from "./lib/embeddings";
-import type { CandidateMatch } from "./lib/embeddings";
-import { buildLocalPrompt, buildApiPrompt } from "./lib/system-prompt";
-import { checkWebGPU } from "./lib/webgpu";
+import { buildApiPrompt } from "./lib/system-prompt";
 import type { Provider } from "./lib/provider";
 import { ProviderSelector } from "./components/ProviderSelector";
 import { StorkredsSelector } from "./components/StorkredsSelector";
-import { CandidateResults } from "./components/CandidateResults";
+import { ResultsPage } from "./components/ResultsPage";
 import { ChoiceToolUI } from "./components/ChoiceButtons";
 
 interface Storkreds {
@@ -25,7 +22,12 @@ interface Storkreds {
   candidateCount: number;
 }
 
-interface CandidateData {
+interface CandidateAnswer {
+  score: number;
+  comment: string;
+}
+
+export interface CandidateData {
   id: number;
   name: string;
   party: string;
@@ -34,47 +36,58 @@ interface CandidateData {
   age?: number;
   occupation?: string;
   pitch?: string;
-}
-
-function ModelLoadingOverlay({ items }: { items: Map<string, number> }) {
-  if (items.size === 0) return null;
-  return (
-    <div className="fixed inset-0 bg-black/60 flex flex-col items-center justify-center z-50">
-      <h2 className="text-white text-xl font-bold mb-6">
-        Henter AI-modeller...
-      </h2>
-      <p className="text-white/70 text-sm mb-4">
-        Første gang tager det et par minutter. Modellerne caches i browseren.
-      </p>
-      {[...items.entries()].map(([file, progress]) => (
-        <div key={file} className="w-80 mb-3">
-          <p className="text-white/80 text-xs truncate">{file}</p>
-          <div className="bg-white/20 rounded-full h-2 mt-1">
-            <div
-              className="bg-red-600 h-2 rounded-full transition-all duration-300"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
+  priorities?: string[];
+  answers?: Record<string, CandidateAnswer>;
 }
 
 // --- Thread UI built from assistant-ui primitives ---
 
+const THINKING_PREFIX = "💭\n";
+
+function ThinkingBlock({ text, streaming }: { text: string; streaming: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasError = text.includes("\n---\n");
+  const thinkingContent = hasError ? text.split("\n---\n")[0] : text;
+  const errorMessage = hasError ? text.split("\n---\n").slice(1).join("\n---\n").trim() : null;
+
+  return (
+    <div>
+      <div
+        className="text-gray-400 italic text-sm cursor-pointer select-none flex items-center gap-1 hover:text-gray-500"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <span className={streaming && !hasError ? "animate-pulse" : ""}>
+          {hasError ? "Tænkte..." : "Tænker..."}
+        </span>
+        <span className="text-xs">{expanded ? "▾" : "▸"}</span>
+      </div>
+      {expanded && (
+        <pre className="text-xs text-gray-400 mt-1 whitespace-pre-wrap max-h-48 overflow-y-auto border-l-2 border-gray-200 pl-2 font-sans">
+          {thinkingContent}
+        </pre>
+      )}
+      {errorMessage && (
+        <span className="block mt-2 text-gray-600 text-sm">{errorMessage}</span>
+      )}
+    </div>
+  );
+}
+
 function TextPart() {
   const part = useMessagePartText();
-  const isThinking = part.text.includes("💭 Tænker...");
 
-  if (isThinking) {
-    const visibleText = part.text.replace(/\n*💭 Tænker\.\.\.$/, "").trim();
+  // Check for thinking content (💭\n prefix from adapters)
+  const thinkingIdx = part.text.indexOf(THINKING_PREFIX);
+  if (thinkingIdx !== -1) {
+    const beforeThinking = part.text.slice(0, thinkingIdx).trim();
+    const thinkingContent = part.text.slice(thinkingIdx + THINKING_PREFIX.length);
+    // Streaming if the text doesn't contain the error marker
+    const isStreaming = !thinkingContent.includes("\n---\n");
+
     return (
       <>
-        {visibleText && <span>{visibleText}</span>}
-        <span className="block text-gray-400 italic text-sm animate-pulse mt-1">
-          Tænker...
-        </span>
+        {beforeThinking && <span className="block mb-2">{beforeThinking}</span>}
+        <ThinkingBlock text={thinkingContent} streaming={isStreaming} />
       </>
     );
   }
@@ -156,105 +169,52 @@ function AutoStart({ ready }: { ready: boolean }) {
   return null;
 }
 
-// --- Match detection ---
+// --- User message collector (reads messages from thread runtime) ---
 
-function MatchDetector({
-  onMatch,
-  matchTriggered,
-}: {
-  onMatch: (userMessages: string[]) => void;
-  matchTriggered: boolean;
-}) {
+function UserMessageCollector({ messagesRef }: { messagesRef: React.MutableRefObject<() => string[]> }) {
   const threadRuntime = useThreadRuntime();
-
-  useEffect(() => {
-    if (matchTriggered) return;
-
-    const unsubscribe = threadRuntime.subscribe(() => {
-      const state = threadRuntime.getState();
-      const messages = state.messages;
-      if (!messages?.length) return;
-
-      const lastMsg = messages[messages.length - 1];
-      if (lastMsg.role !== "assistant") return;
-
-      const text = lastMsg.content
-        ?.filter(
-          (p): p is { type: "text"; text: string } => p.type === "text",
-        )
-        .map((p) => p.text)
-        .join("");
-
-      if (text?.includes("[KLAR TIL MATCH]")) {
-        const userMessages = messages
-          .filter((m) => m.role === "user")
-          .map((m) =>
-            m.content
-              .filter(
-                (p): p is { type: "text"; text: string } => p.type === "text",
-              )
-              .map((p) => p.text)
-              .join(""),
-          );
-        onMatch(userMessages);
-      }
-    });
-
-    return unsubscribe;
-  }, [threadRuntime, onMatch, matchTriggered]);
-
+  messagesRef.current = () => {
+    const state = threadRuntime.getState();
+    return (state.messages ?? [])
+      .filter((m: any) => m.role === "user")
+      .map((m: any) =>
+        m.content
+          .filter((p: any) => p.type === "text")
+          .map((p: any) => p.text)
+          .join(""),
+      );
+  };
   return null;
 }
 
 // --- Main App ---
 
 export default function App() {
-  const llmWorkerRef = useRef<Worker | null>(null);
   const embeddingsRef = useRef<EmbeddingManager | null>(null);
   const [provider, setProvider] = useState<Provider | null>(null);
-  const [progressItems, setProgressItems] = useState<Map<string, number>>(
-    new Map(),
-  );
   const [modelsReady, setModelsReady] = useState(false);
   const [selectedStorkreds, setSelectedStorkreds] = useState<string | null>(
     null,
   );
   const [storkredse, setStorkredse] = useState<Storkreds[]>([]);
-  const [webgpuSupported, setWebgpuSupported] = useState(true);
-  const [matches, setMatches] = useState<CandidateMatch[] | null>(null);
   const [candidates, setCandidates] = useState<Map<number, CandidateData>>(
     new Map(),
   );
   const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
+  const [screen, setScreen] = useState<"chat" | "results">("chat");
+  const [questions, setQuestions] = useState<Record<string, string>>({});
+  const getUserMessagesRef = useRef<() => string[]>(() => []);
 
   const handleProgress = useCallback(
     (data: { status?: string; file?: string; progress?: number }) => {
       if (!data.file) return;
-      if (data.status === "initiate" || data.status === "download") {
-        setProgressItems((prev) => new Map(prev).set(data.file!, 0));
-      } else if (data.status === "progress") {
-        setProgressItems(
-          (prev) => new Map(prev).set(data.file!, data.progress ?? 0),
-        );
-      } else if (data.status === "done") {
-        setProgressItems((prev) => {
-          const next = new Map(prev);
-          next.delete(data.file!);
-          return next;
-        });
-      }
+      // Progress tracking for embeddings if needed in the future
     },
     [],
   );
 
-  // Check WebGPU + load static data on mount
+  // Load static data on mount
   useEffect(() => {
-    checkWebGPU().then((result) => {
-      if (!result.supported) {
-        setWebgpuSupported(false);
-      }
-    });
-
     fetch("/storkredse.json")
       .then((r) => r.json())
       .then(setStorkredse);
@@ -266,12 +226,11 @@ export default function App() {
       });
   }, []);
 
-  // Load models when provider is selected
+  // Load embedding model when provider is selected
   useEffect(() => {
     if (!provider) return;
 
     async function loadModels() {
-      // Always load embeddings
       try {
         embeddingsRef.current = new EmbeddingManager(handleProgress);
         await embeddingsRef.current.load();
@@ -279,38 +238,6 @@ export default function App() {
       } catch (e) {
         console.error("[APP] Embedding model failed:", e);
       }
-
-      // Only load LLM worker for local provider
-      if (provider!.type === "local") {
-        try {
-          const worker = new Worker(
-            new URL("./workers/llm-worker.ts", import.meta.url),
-            { type: "module" },
-          );
-          llmWorkerRef.current = worker;
-
-          worker.addEventListener("message", (e) => handleProgress(e.data));
-
-          await new Promise<void>((resolve, reject) => {
-            const handler = (e: MessageEvent) => {
-              if (e.data.type === "ready") {
-                worker.removeEventListener("message", handler);
-                resolve();
-              }
-            };
-            worker.addEventListener("message", handler);
-            worker.addEventListener("error", (e) => {
-              console.error("[APP] LLM worker error:", e);
-              reject(e);
-            });
-            worker.postMessage({ type: "load" });
-          });
-          console.log("[APP] LLM model loaded");
-        } catch (e) {
-          console.error("[APP] LLM model failed:", e);
-        }
-      }
-
       setModelsReady(true);
     }
 
@@ -333,48 +260,27 @@ export default function App() {
         .replace(/\s+/g, "-");
       const localForStorkreds = localMap[storkredsSlug] ?? {};
 
-      const promptBuilder =
-        provider!.type === "api" ? buildApiPrompt : buildLocalPrompt;
+      setQuestions(national);
       setSystemPrompt(
-        promptBuilder(national, localForStorkreds, selectedStorkreds!),
+        buildApiPrompt(national, localForStorkreds, selectedStorkreds!),
       );
     }
 
     loadPrompt();
   }, [selectedStorkreds, provider]);
 
-  // ProviderSelector handles sessionStorage internally
   const handleProviderSelect = useCallback((p: Provider) => {
     setProvider(p);
   }, []);
 
-  // Build adapter based on provider type
-  const adapter =
-    provider?.type === "api"
-      ? createApiAdapter(
-          provider.baseUrl,
-          provider.apiKey,
-          provider.model,
-          systemPrompt ?? "",
-        )
-      : createLLMAdapter(llmWorkerRef.current!, systemPrompt ?? "");
+  const adapter = provider
+    ? createAISDKAdapter(provider, systemPrompt ?? "")
+    : createAISDKAdapter(
+        { kind: "openai", apiKey: "", model: "", label: "" },
+        "",
+      );
 
   const runtime = useLocalRuntime(adapter);
-
-  const handleMatchDetected = useCallback(
-    async (userMessages: string[]) => {
-      if (!embeddingsRef.current || !modelsReady) return;
-      const userText = userMessages.join("\n\n");
-      const embedding = await embeddingsRef.current.embed(userText);
-      const results = embeddingsRef.current.findMatches(
-        embedding,
-        10,
-        selectedStorkreds ?? undefined,
-      );
-      setMatches(results);
-    },
-    [modelsReady, selectedStorkreds],
-  );
 
   // --- Render screens ---
 
@@ -382,10 +288,7 @@ export default function App() {
   if (!provider) {
     return (
       <div className="h-dvh flex flex-col max-w-2xl mx-auto">
-        <ProviderSelector
-          webgpuSupported={webgpuSupported}
-          onSelect={handleProviderSelect}
-        />
+        <ProviderSelector onSelect={handleProviderSelect} />
       </div>
     );
   }
@@ -393,51 +296,73 @@ export default function App() {
   // Screen 2: Storkreds selection
   if (!selectedStorkreds) {
     return (
-      <>
-        {provider.type === "local" && (
-          <ModelLoadingOverlay items={progressItems} />
-        )}
-        <div className="h-dvh flex flex-col max-w-2xl mx-auto">
-          <StorkredsSelector
-            storkredse={storkredse}
-            onSelect={setSelectedStorkreds}
-          />
-        </div>
-      </>
+      <div className="h-dvh flex flex-col max-w-2xl mx-auto">
+        <StorkredsSelector
+          storkredse={storkredse}
+          onSelect={setSelectedStorkreds}
+        />
+      </div>
     );
   }
 
-  // Screen 3: Chat
+  // Screen 3: Chat / Results
   const chatReady = modelsReady && !!systemPrompt;
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      {provider.type === "local" && (
-        <ModelLoadingOverlay items={progressItems} />
-      )}
       <div className="h-dvh flex flex-col max-w-2xl mx-auto">
-        <header className="px-4 py-3 border-b flex items-baseline gap-3">
-          <h1 className="text-xl font-bold text-red-700">Kandidattest</h1>
-          <span className="text-sm text-gray-500">{selectedStorkreds}</span>
-          <span className="text-xs text-gray-400 ml-auto">
-            {provider.type === "api" ? provider.model : "Qwen3 1.7B (lokal)"}
-          </span>
+        <header className="px-4 py-3 border-b">
+          <div className="flex items-baseline gap-3">
+            <h1 className="text-xl font-bold text-red-700">Kandidattest</h1>
+            <span className="text-sm text-gray-500">{selectedStorkreds}</span>
+            <span className="text-xs text-gray-400 ml-auto">
+              {provider.label}: {provider.model}
+            </span>
+          </div>
+          <nav className="flex gap-4 mt-2">
+            <button
+              onClick={() => setScreen("chat")}
+              className={`text-sm pb-1 border-b-2 transition ${
+                screen === "chat"
+                  ? "border-red-600 text-red-700 font-medium"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              Samtale
+            </button>
+            <button
+              onClick={() => setScreen("results")}
+              className={`text-sm pb-1 border-b-2 transition ${
+                screen === "results"
+                  ? "border-red-600 text-red-700 font-medium"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              Resultater
+            </button>
+          </nav>
         </header>
-        <div className="flex-1 overflow-hidden">
-          <ChatThread />
-        </div>
-        {matches && (
-          <div className="border-t max-h-[50vh] overflow-y-auto">
-            <CandidateResults matches={matches} candidates={candidates} />
+        {screen === "chat" ? (
+          <div className="flex-1 overflow-hidden">
+            <ChatThread />
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto">
+            <ResultsPage
+              embeddingsRef={embeddingsRef}
+              modelsReady={modelsReady}
+              selectedStorkreds={selectedStorkreds!}
+              candidates={candidates}
+              provider={provider!}
+              questions={questions}
+              getUserMessages={getUserMessagesRef.current}
+            />
           </div>
         )}
       </div>
       <ChoiceToolUI />
       <AutoStart ready={chatReady} />
-      <MatchDetector
-        onMatch={handleMatchDetected}
-        matchTriggered={matches !== null}
-      />
+      <UserMessageCollector messagesRef={getUserMessagesRef} />
     </AssistantRuntimeProvider>
   );
 }
