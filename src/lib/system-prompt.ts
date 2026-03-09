@@ -6,6 +6,41 @@
  * naturally rather than jumping between unrelated topics.
  */
 
+/**
+ * Simple prompt for the small local model (1.7B).
+ * Keeps instructions minimal to fit within the model's capability.
+ */
+export function buildLocalPrompt(
+  nationalQuestions: Record<string, string>,
+  localQuestions: Record<string, string>,
+  storkredsName: string,
+): string {
+  const questions = Object.values(nationalQuestions)
+    .map((q, i) => `${i + 1}. ${q}`)
+    .join("\n");
+
+  const local = Object.values(localQuestions)
+    .map((q, i) => `${i + 1}. ${q}`)
+    .join("\n");
+
+  return `Du er en venlig politisk rådgiver. Du hjælper vælgere med at finde deres kandidat til FV2026.
+Svar KUN på dansk. Hold beskeder korte — maks 2 sætninger.
+
+Spørgsmål du skal stille (ét ad gangen, med dine egne ord):
+${questions}
+
+Lokale spørgsmål for ${storkredsName}:
+${local}
+
+Regler:
+- Stil ét spørgsmål ad gangen med dine egne ord
+- Dæk mindst 10 nationale og 2 lokale spørgsmål
+- Hvis svaret er uklart, stil ét opfølgende spørgsmål
+- Vær neutral — vis aldrig din holdning
+- Når du er færdig, skriv: [KLAR TIL MATCH]
+- Start med en kort velkomst og dit første spørgsmål`;
+}
+
 // Thematic grouping of national question IDs for natural conversation flow
 const THEME_ORDER: { theme: string; keys: string[] }[] = [
   {
@@ -69,7 +104,7 @@ const THEME_ORDER: { theme: string; keys: string[] }[] = [
   },
 ];
 
-export function buildSystemPrompt(
+export function buildApiPrompt(
   nationalQuestions: Record<string, string>,
   localQuestions: Record<string, string>,
   storkredsName: string,
