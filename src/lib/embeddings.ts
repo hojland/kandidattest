@@ -65,13 +65,14 @@ export class EmbeddingManager {
       fetch(embFile).then((r) => r.arrayBuffer()),
       fetch("/embedding_index.json").then((r) => r.json()),
     ]);
-    this.candidateEmbeddings = new Float32Array(embBuf);
-    this.index = indexData;
-
+    const embs = new Float32Array(embBuf);
+    const idx: EmbeddingIndex = indexData;
     // Derive dim from the binary file (supports different embedding models)
-    if (this.index.count > 0) {
-      this.index.dim = this.candidateEmbeddings.length / this.index.count;
+    if (idx.count > 0) {
+      idx.dim = embs.length / idx.count;
     }
+    this.candidateEmbeddings = embs;
+    this.index = idx;
 
     // Center candidate embeddings to remove shared signal
     // (same language, same domain, same format all compress similarity into a tiny band)
