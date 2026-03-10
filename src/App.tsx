@@ -120,7 +120,7 @@ function Composer() {
         <ComposerPrimitive.Root className="relative">
           <ComposerPrimitive.Input
             placeholder="Skriv din besked..."
-            className="w-full resize-none rounded-2xl border border-gray-300 px-4 py-3 pr-12 text-sm outline-none focus:ring-2 focus:ring-ft-red-light focus:border-ft-red shadow-sm"
+            className="w-full resize-none rounded-2xl border border-gray-300 px-4 py-3 pr-12 text-base sm:text-sm outline-none focus:ring-2 focus:ring-ft-red-light focus:border-ft-red shadow-sm"
           />
           <ComposerPrimitive.Send className="absolute right-3 bottom-3 w-8 h-8 flex items-center justify-center rounded-full bg-ft-red text-white hover:bg-ft-red-dark disabled:opacity-30 disabled:bg-gray-300 transition">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
