@@ -306,9 +306,14 @@ export default function App() {
 
     async function loadModels() {
       try {
-        embeddingsRef.current = new EmbeddingManager(handleProgress);
+        const backend = provider!.kind === "google" ? "google-api" as const : "wasm" as const;
+        embeddingsRef.current = new EmbeddingManager({
+          backend,
+          onProgress: handleProgress,
+          apiKey: provider!.apiKey,
+        });
         await embeddingsRef.current.load();
-        console.log("[APP] Embedding model loaded");
+        console.log("[APP] Embedding model loaded (backend: %s)", backend);
       } catch (e) {
         console.error("[APP] Embedding model failed:", e);
       }
@@ -316,6 +321,10 @@ export default function App() {
     }
 
     loadModels();
+
+    return () => {
+      embeddingsRef.current?.dispose();
+    };
   }, [provider, handleProgress]);
 
   // Load system prompt when provider changes or storkreds changes

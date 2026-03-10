@@ -1,3 +1,6 @@
+import { embed } from "ai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
+
 export interface CandidateMatch {
   id: number;
   name: string;
@@ -17,49 +20,75 @@ type ProgressCallback = (data: {
   progress?: number;
 }) => void;
 
+export type EmbeddingBackend = "wasm" | "google-api";
+
+export interface EmbeddingManagerOptions {
+  backend: EmbeddingBackend;
+  onProgress?: ProgressCallback;
+  apiKey?: string;
+}
+
 export class EmbeddingManager {
-  private worker: Worker;
+  private worker: Worker | null = null;
   private candidateEmbeddings: Float32Array | null = null;
   private index: EmbeddingIndex | null = null;
   private onProgress: ProgressCallback | undefined;
+  private backend: EmbeddingBackend;
+  private apiKey: string | undefined;
   /** Mean embedding across all candidates, used for centering */
   private meanEmbedding: Float32Array | null = null;
 
-  constructor(onProgress?: ProgressCallback) {
-    this.onProgress = onProgress;
-    this.worker = new Worker(
-      new URL("../workers/embedding-worker.ts", import.meta.url),
-      { type: "module" },
-    );
-    this.worker.addEventListener("message", (e) => {
-      if (e.data.type === "progress" && this.onProgress) {
-        this.onProgress(e.data);
-      }
-    });
+  constructor(options: EmbeddingManagerOptions) {
+    this.backend = options.backend;
+    this.onProgress = options.onProgress;
+    this.apiKey = options.apiKey;
+
+    if (this.backend === "wasm") {
+      this.worker = new Worker(
+        new URL("../workers/embedding-worker.ts", import.meta.url),
+        { type: "module" },
+      );
+      this.worker.addEventListener("message", (e) => {
+        if (e.data.type === "progress" && this.onProgress) {
+          this.onProgress(e.data);
+        }
+      });
+    }
   }
 
   async load(): Promise<void> {
+    const embFile = this.backend === "google-api"
+      ? "/embeddings_google.bin"
+      : "/embeddings.bin";
+
     const [embBuf, indexData] = await Promise.all([
-      fetch("/embeddings.bin").then((r) => r.arrayBuffer()),
+      fetch(embFile).then((r) => r.arrayBuffer()),
       fetch("/embedding_index.json").then((r) => r.json()),
     ]);
     this.candidateEmbeddings = new Float32Array(embBuf);
     this.index = indexData;
 
+    // Derive dim from the binary file (supports different embedding models)
+    if (this.index.count > 0) {
+      this.index.dim = this.candidateEmbeddings.length / this.index.count;
+    }
+
     // Center candidate embeddings to remove shared signal
     // (same language, same domain, same format all compress similarity into a tiny band)
     this.centerEmbeddings();
 
-    return new Promise((resolve) => {
-      const handler = (e: MessageEvent) => {
-        if (e.data.type === "ready") {
-          this.worker.removeEventListener("message", handler);
-          resolve();
-        }
-      };
-      this.worker.addEventListener("message", handler);
-      this.worker.postMessage({ type: "load" });
-    });
+    if (this.backend === "wasm" && this.worker) {
+      return new Promise((resolve) => {
+        const handler = (e: MessageEvent) => {
+          if (e.data.type === "ready") {
+            this.worker!.removeEventListener("message", handler);
+            resolve();
+          }
+        };
+        this.worker!.addEventListener("message", handler);
+        this.worker!.postMessage({ type: "load" });
+      });
+    }
   }
 
   /**
@@ -111,17 +140,47 @@ export class EmbeddingManager {
   }
 
   async embed(text: string): Promise<number[]> {
+    if (this.backend === "google-api") {
+      return this.embedViaApi(text);
+    }
     const id = crypto.randomUUID();
     return new Promise((resolve) => {
       const handler = (e: MessageEvent) => {
         if (e.data.type === "embedding" && e.data.id === id) {
-          this.worker.removeEventListener("message", handler);
+          this.worker!.removeEventListener("message", handler);
           resolve(e.data.embedding);
         }
       };
-      this.worker.addEventListener("message", handler);
-      this.worker.postMessage({ type: "embed", text, id });
+      this.worker!.addEventListener("message", handler);
+      this.worker!.postMessage({ type: "embed", text, id });
     });
+  }
+
+  private async embedViaApi(text: string): Promise<number[]> {
+    const google = createGoogleGenerativeAI({ apiKey: this.apiKey! });
+    const { embedding } = await embed({
+      model: google.embedding("gemini-embedding-001"),
+      value: text,
+    });
+    // L2 normalize
+    let norm = 0;
+    for (let i = 0; i < embedding.length; i++) {
+      norm += embedding[i] * embedding[i];
+    }
+    norm = Math.sqrt(norm);
+    if (norm > 0) {
+      for (let i = 0; i < embedding.length; i++) {
+        embedding[i] /= norm;
+      }
+    }
+    return embedding;
+  }
+
+  dispose(): void {
+    if (this.worker) {
+      this.worker.terminate();
+      this.worker = null;
+    }
   }
 
   findMatches(
