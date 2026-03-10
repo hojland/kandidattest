@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   type Provider,
   API_PRESETS,
@@ -59,6 +59,9 @@ export function ProviderSelector({ open, onClose, onSelect }: Props) {
     onClose();
   }
 
+  const [guideOpen, setGuideOpen] = useState(false);
+  const toggleGuide = useCallback(() => setGuideOpen((v) => !v), []);
+
   const currentPreset = API_PRESETS[preset];
   const needsBaseUrl = currentPreset.kind === "openai-compatible";
   const allFilled = apiKey.trim() && model.trim() && (!needsBaseUrl || baseUrl.trim());
@@ -82,9 +85,47 @@ export function ProviderSelector({ open, onClose, onSelect }: Props) {
         <h2 className="text-xl font-bold text-ft-red-dark mb-1">
           Indstillinger
         </h2>
-        <p className="text-gray-500 text-sm mb-5">
+        <p className="text-gray-500 text-sm mb-3">
           Vælg AI-udbyder
         </p>
+
+        {/* Inline guide */}
+        <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 text-sm">
+          <button
+            type="button"
+            onClick={toggleGuide}
+            className="w-full flex items-center justify-between px-3 py-2 text-left font-medium text-gray-700 hover:text-gray-900"
+          >
+            <span>Hvordan får jeg en API-nøgle?</span>
+            <span className={`transition-transform ${guideOpen ? "rotate-180" : ""}`}>▾</span>
+          </button>
+          {guideOpen && (
+            <div className="px-3 pb-3 text-gray-600 space-y-2">
+              <p>
+                <strong>Gemini anbefales</strong> — gratis, og du kan bruge din Google-konto:
+              </p>
+              <ol className="list-decimal list-inside space-y-1 pl-1">
+                <li>
+                  Gå til{" "}
+                  <a
+                    href="https://aistudio.google.com/apikey"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-ft-red hover:underline"
+                  >
+                    aistudio.google.com/apikey
+                  </a>
+                </li>
+                <li>Log ind med din Google-konto</li>
+                <li>Klik <strong>"Create API key"</strong> → kopiér nøglen</li>
+                <li>Indsæt den herunder — færdig!</li>
+              </ol>
+              <p className="text-xs text-gray-400">
+                Ingen kreditkort. Googles gratis tier dækker rigeligt til en kandidattest.
+              </p>
+            </div>
+          )}
+        </div>
 
         <form onSubmit={handleApiSubmit} className="space-y-4">
           {/* Preset dropdown */}
