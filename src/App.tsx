@@ -76,12 +76,10 @@ function ThinkingBlock({ text, streaming }: { text: string; streaming: boolean }
 function TextPart() {
   const part = useMessagePartText();
 
-  // Check for thinking content (💭\n prefix from adapters)
   const thinkingIdx = part.text.indexOf(THINKING_PREFIX);
   if (thinkingIdx !== -1) {
     const beforeThinking = part.text.slice(0, thinkingIdx).trim();
     const thinkingContent = part.text.slice(thinkingIdx + THINKING_PREFIX.length);
-    // Streaming if the text doesn't contain the error marker
     const isStreaming = !thinkingContent.includes("\n---\n");
 
     return (
@@ -97,8 +95,8 @@ function TextPart() {
 
 function UserMessage() {
   return (
-    <MessagePrimitive.Root className="flex justify-end mb-3">
-      <div className="bg-red-50 text-gray-900 rounded-2xl rounded-br-sm px-4 py-2 max-w-[80%]">
+    <MessagePrimitive.Root className="flex justify-end mb-4">
+      <div className="bg-gray-100 text-gray-900 rounded-2xl rounded-br-sm px-4 py-2 max-w-[80%]">
         <MessagePrimitive.Content components={{ Text: TextPart }} />
       </div>
     </MessagePrimitive.Root>
@@ -107,8 +105,8 @@ function UserMessage() {
 
 function AssistantMessage() {
   return (
-    <MessagePrimitive.Root className="flex justify-start mb-3">
-      <div className="bg-gray-100 text-gray-900 rounded-2xl rounded-bl-sm px-4 py-2 max-w-[80%]">
+    <MessagePrimitive.Root className="flex justify-start mb-4">
+      <div className="text-gray-900 max-w-[80%] px-1">
         <MessagePrimitive.Content components={{ Text: TextPart }} />
       </div>
     </MessagePrimitive.Root>
@@ -117,33 +115,94 @@ function AssistantMessage() {
 
 function Composer() {
   return (
-    <ComposerPrimitive.Root className="flex gap-2 p-3 border-t">
-      <ComposerPrimitive.Input
-        placeholder="Skriv din besked..."
-        className="flex-1 px-4 py-2 border rounded-full text-sm outline-none focus:ring-2 focus:ring-red-200"
-      />
-      <ComposerPrimitive.Send className="px-4 py-2 bg-red-600 text-white rounded-full text-sm font-medium hover:bg-red-700 disabled:opacity-50">
-        Send
-      </ComposerPrimitive.Send>
-    </ComposerPrimitive.Root>
+    <div className="border-t bg-white p-4">
+      <div className="max-w-3xl mx-auto w-full">
+        <ComposerPrimitive.Root className="relative">
+          <ComposerPrimitive.Input
+            placeholder="Skriv din besked..."
+            className="w-full resize-none rounded-2xl border border-gray-300 px-4 py-3 pr-12 text-sm outline-none focus:ring-2 focus:ring-ft-red-light focus:border-ft-red shadow-sm"
+          />
+          <ComposerPrimitive.Send className="absolute right-3 bottom-3 w-8 h-8 flex items-center justify-center rounded-full bg-ft-red text-white hover:bg-ft-red-dark disabled:opacity-30 disabled:bg-gray-300 transition">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M8 14V2M8 2L3 7M8 2L13 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </ComposerPrimitive.Send>
+        </ComposerPrimitive.Root>
+      </div>
+    </div>
   );
 }
 
-function ChatThread() {
+// --- Welcome screen with suggestion cards ---
+
+const SUGGESTIONS = [
+  "Hvad mener du om forsvarsudgifter?",
+  "Hvad tænker du om klimapolitik?",
+  "Fortæl om din holdning til skat og ulighed",
+  "Hvad er vigtigst for dig ved dette valg?",
+];
+
+function WelcomeScreen({ hasProvider, onOpenSettings }: { hasProvider: boolean; onOpenSettings: () => void }) {
+  const threadRuntime = useThreadRuntime();
+
+  return (
+    <div className="flex flex-col items-center justify-center h-full px-4">
+      <h2 className="text-2xl font-bold text-ft-red-dark mb-2">
+        Velkommen til Kandidattesten
+      </h2>
+      <p className="text-gray-500 mb-8 text-center max-w-md">
+        Fortæl mig om dine politiske holdninger, så finder vi dine kandidater
+      </p>
+
+      {!hasProvider ? (
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 max-w-md w-full text-center">
+          <p className="text-gray-600 text-sm mb-3">
+            Vælg en AI-udbyder for at komme i gang
+          </p>
+          <button
+            onClick={onOpenSettings}
+            className="px-5 py-2.5 bg-ft-red text-white rounded-lg text-sm font-medium hover:bg-ft-red-dark transition"
+          >
+            Kom i gang
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg w-full">
+          {SUGGESTIONS.map((text) => (
+            <button
+              key={text}
+              onClick={() => {
+                threadRuntime.append({
+                  role: "user",
+                  content: [{ type: "text", text }],
+                });
+              }}
+              className="text-left p-4 rounded-xl border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition"
+            >
+              {text}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChatThread({ hasProvider, onOpenSettings }: { hasProvider: boolean; onOpenSettings: () => void }) {
   return (
     <ThreadPrimitive.Root className="flex flex-col h-full">
-      <ThreadPrimitive.Viewport className="flex-1 overflow-y-auto p-4">
-        <ThreadPrimitive.Empty>
-          <p className="text-center text-gray-400 mt-8">
-            Klar til at starte...
-          </p>
-        </ThreadPrimitive.Empty>
-        <ThreadPrimitive.Messages
-          components={{
-            UserMessage,
-            AssistantMessage,
-          }}
-        />
+      <ThreadPrimitive.Viewport className="flex-1 overflow-y-auto">
+        <div className="max-w-3xl mx-auto w-full px-4 py-4">
+          <ThreadPrimitive.Empty>
+            <WelcomeScreen hasProvider={hasProvider} onOpenSettings={onOpenSettings} />
+          </ThreadPrimitive.Empty>
+          <ThreadPrimitive.Messages
+            components={{
+              UserMessage,
+              AssistantMessage,
+            }}
+          />
+        </div>
         <ThreadPrimitive.ViewportFooter />
       </ThreadPrimitive.Viewport>
       <Composer />
@@ -151,25 +210,7 @@ function ChatThread() {
   );
 }
 
-// --- Auto-start: sends a hidden trigger to make the model speak first ---
-
-function AutoStart({ ready }: { ready: boolean }) {
-  const threadRuntime = useThreadRuntime();
-  const started = useRef(false);
-
-  useEffect(() => {
-    if (!ready || started.current) return;
-    started.current = true;
-    threadRuntime.append({
-      role: "user",
-      content: [{ type: "text", text: "Hej! Start venligst samtalen." }],
-    });
-  }, [ready, threadRuntime]);
-
-  return null;
-}
-
-// --- User message collector (reads messages from thread runtime) ---
+// --- User message collector ---
 
 function UserMessageCollector({ messagesRef }: { messagesRef: React.MutableRefObject<() => string[]> }) {
   const threadRuntime = useThreadRuntime();
@@ -187,28 +228,61 @@ function UserMessageCollector({ messagesRef }: { messagesRef: React.MutableRefOb
   return null;
 }
 
+// --- Stub adapter for no-provider state ---
+
+function createStubAdapter(message?: string) {
+  return {
+    async *run() {
+      yield {
+        content: [
+          {
+            type: "text" as const,
+            text: message ?? "Konfigurer en model under Indstillinger for at starte chatten.",
+          },
+        ],
+      };
+    },
+  };
+}
+
+// --- Settings gear icon ---
+
+function SettingsButton({ hasProvider, onClick }: { hasProvider: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="relative p-2 text-gray-500 hover:text-ft-red-dark transition"
+      title="Indstillinger"
+    >
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="10" cy="10" r="3" />
+        <path d="M10 1.5v2M10 16.5v2M1.5 10h2M16.5 10h2M3.4 3.4l1.4 1.4M15.2 15.2l1.4 1.4M3.4 16.6l1.4-1.4M15.2 4.8l1.4-1.4" />
+      </svg>
+      {!hasProvider && (
+        <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-ft-red rounded-full border-2 border-white" />
+      )}
+    </button>
+  );
+}
+
 // --- Main App ---
 
 export default function App() {
   const embeddingsRef = useRef<EmbeddingManager | null>(null);
   const [provider, setProvider] = useState<Provider | null>(null);
   const [modelsReady, setModelsReady] = useState(false);
-  const [selectedStorkreds, setSelectedStorkreds] = useState<string | null>(
-    null,
-  );
+  const [selectedStorkreds, setSelectedStorkreds] = useState<string | null>(null);
   const [storkredse, setStorkredse] = useState<Storkreds[]>([]);
-  const [candidates, setCandidates] = useState<Map<number, CandidateData>>(
-    new Map(),
-  );
+  const [candidates, setCandidates] = useState<Map<number, CandidateData>>(new Map());
   const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
   const [screen, setScreen] = useState<"chat" | "results">("chat");
   const [questions, setQuestions] = useState<Record<string, string>>({});
+  const [showSettings, setShowSettings] = useState(false);
   const getUserMessagesRef = useRef<() => string[]>(() => []);
 
   const handleProgress = useCallback(
     (data: { status?: string; file?: string; progress?: number }) => {
       if (!data.file) return;
-      // Progress tracking for embeddings if needed in the future
     },
     [],
   );
@@ -244,9 +318,9 @@ export default function App() {
     loadModels();
   }, [provider, handleProgress]);
 
-  // Load system prompt when storkreds is selected
+  // Load system prompt when provider changes or storkreds changes
   useEffect(() => {
-    if (!selectedStorkreds || !provider) return;
+    if (!provider) return;
 
     async function loadPrompt() {
       const [national, allLocal] = await Promise.all([
@@ -254,15 +328,19 @@ export default function App() {
         fetch("/local_questions.json").then((r) => r.json()),
       ]);
       const localMap = allLocal as Record<string, Record<string, string>>;
-      const storkredsSlug = selectedStorkreds!
-        .replace(/\s*storkreds$/i, "")
-        .toLowerCase()
-        .replace(/\s+/g, "-");
-      const localForStorkreds = localMap[storkredsSlug] ?? {};
+
+      let localForStorkreds: Record<string, string> = {};
+      if (selectedStorkreds) {
+        const storkredsSlug = selectedStorkreds
+          .replace(/\s*storkreds$/i, "")
+          .toLowerCase()
+          .replace(/\s+/g, "-");
+        localForStorkreds = localMap[storkredsSlug] ?? {};
+      }
 
       setQuestions(national);
       setSystemPrompt(
-        buildApiPrompt(national, localForStorkreds, selectedStorkreds!),
+        buildApiPrompt(national, localForStorkreds, selectedStorkreds),
       );
     }
 
@@ -273,85 +351,86 @@ export default function App() {
     setProvider(p);
   }, []);
 
-  const adapter = provider
-    ? createAISDKAdapter(provider, systemPrompt ?? "")
-    : createAISDKAdapter(
-        { kind: "openai", apiKey: "", model: "", label: "" },
-        "",
-      );
+  const adapter = (() => {
+    if (!provider) return createStubAdapter();
+    return createAISDKAdapter(provider, systemPrompt ?? "");
+  })();
 
   const runtime = useLocalRuntime(adapter);
 
-  // --- Render screens ---
-
-  // Screen 1: Provider selection
-  if (!provider) {
-    return (
-      <div className="h-dvh flex flex-col max-w-2xl mx-auto">
-        <ProviderSelector onSelect={handleProviderSelect} />
-      </div>
-    );
-  }
-
-  // Screen 2: Storkreds selection
-  if (!selectedStorkreds) {
-    return (
-      <div className="h-dvh flex flex-col max-w-2xl mx-auto">
-        <StorkredsSelector
-          storkredse={storkredse}
-          onSelect={setSelectedStorkreds}
-        />
-      </div>
-    );
-  }
-
-  // Screen 3: Chat / Results
-  const chatReady = modelsReady && !!systemPrompt;
-
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <div className="h-dvh flex flex-col max-w-2xl mx-auto">
-        <header className="px-4 py-3 border-b">
-          <div className="flex items-baseline gap-3">
-            <h1 className="text-xl font-bold text-red-700">Kandidattest</h1>
-            <span className="text-sm text-gray-500">{selectedStorkreds}</span>
-            <span className="text-xs text-gray-400 ml-auto">
-              {provider.label}: {provider.model}
-            </span>
+      <div className="h-dvh flex flex-col bg-white">
+        {/* Header */}
+        <header className="border-b bg-white shrink-0">
+          <div className="max-w-5xl mx-auto w-full px-4 py-2 flex items-center gap-3">
+            {/* Left: Storkreds dropdown */}
+            <StorkredsSelector
+              storkredse={storkredse}
+              selected={selectedStorkreds}
+              onSelect={setSelectedStorkreds}
+            />
+
+            {/* Center: Title */}
+            <h1 className="text-lg font-bold text-ft-red-dark flex-1 text-center">
+              Kandidattest
+            </h1>
+
+            {/* Right: Provider info + Settings */}
+            <div className="flex items-center gap-2">
+              {provider && (
+                <span className="text-xs text-gray-400 hidden sm:inline">
+                  {`${provider.label}: ${provider.model}`}
+                </span>
+              )}
+              <SettingsButton
+                hasProvider={!!provider}
+                onClick={() => setShowSettings(true)}
+              />
+            </div>
           </div>
-          <nav className="flex gap-4 mt-2">
-            <button
-              onClick={() => setScreen("chat")}
-              className={`text-sm pb-1 border-b-2 transition ${
-                screen === "chat"
-                  ? "border-red-600 text-red-700 font-medium"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              Samtale
-            </button>
-            <button
-              onClick={() => setScreen("results")}
-              className={`text-sm pb-1 border-b-2 transition ${
-                screen === "results"
-                  ? "border-red-600 text-red-700 font-medium"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              Resultater
-            </button>
-          </nav>
+
+          {/* Tab bar */}
+          <div className="max-w-5xl mx-auto w-full px-4">
+            <nav className="flex gap-6">
+              <button
+                onClick={() => setScreen("chat")}
+                className={`text-sm pb-2 border-b-2 transition font-medium ${
+                  screen === "chat"
+                    ? "border-ft-red text-ft-red-dark"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Samtale
+              </button>
+              <button
+                onClick={() => setScreen("results")}
+                className={`text-sm pb-2 border-b-2 transition font-medium ${
+                  screen === "results"
+                    ? "border-ft-red text-ft-red-dark"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Resultater
+              </button>
+            </nav>
+          </div>
         </header>
+
+        {/* Main content */}
         {screen === "chat" ? (
           <div className="flex-1 overflow-hidden">
-            <ChatThread />
+            <ChatThread
+              hasProvider={!!provider}
+              onOpenSettings={() => setShowSettings(true)}
+            />
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto">
             <ResultsPage
               embeddingsRef={embeddingsRef}
               modelsReady={modelsReady}
-              selectedStorkreds={selectedStorkreds!}
+              selectedStorkreds={selectedStorkreds}
               candidates={candidates}
               provider={provider!}
               questions={questions}
@@ -360,8 +439,14 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {/* Modal */}
+      <ProviderSelector
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+        onSelect={handleProviderSelect}
+      />
       <ChoiceToolUI />
-      <AutoStart ready={chatReady} />
       <UserMessageCollector messagesRef={getUserMessagesRef} />
     </AssistantRuntimeProvider>
   );

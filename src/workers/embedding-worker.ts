@@ -1,7 +1,9 @@
 import { AutoModel, AutoTokenizer, Tensor } from "@huggingface/transformers";
 
-let model: InstanceType<typeof AutoModel> | null = null;
-let tokenizer: InstanceType<typeof AutoTokenizer> | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let model: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let tokenizer: any = null;
 
 self.addEventListener("message", async (event: MessageEvent) => {
   const { type, text, id } = event.data;
@@ -9,10 +11,10 @@ self.addEventListener("message", async (event: MessageEvent) => {
   if (type === "load") {
     tokenizer = await AutoTokenizer.from_pretrained("onnx-community/embeddinggemma-300m-ONNX");
     model = await AutoModel.from_pretrained("onnx-community/embeddinggemma-300m-ONNX", {
-      dtype: "q4f16",
+      dtype: "q8",
       device: "wasm",
-      progress_callback: (data: unknown) => {
-        self.postMessage({ type: "progress", ...(data as Record<string, unknown>) });
+      progress_callback: (data: Record<string, unknown>) => {
+        self.postMessage({ type: "progress", ...data });
       },
     });
     self.postMessage({ type: "ready" });

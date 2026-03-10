@@ -72,7 +72,7 @@ const THEME_ORDER: { theme: string; keys: string[] }[] = [
 export function buildApiPrompt(
   nationalQuestions: Record<string, string>,
   localQuestions: Record<string, string>,
-  storkredsName: string,
+  storkredsName?: string | null,
 ): string {
   // Build numbered question list grouped by theme
   let questionNum = 1;
@@ -88,17 +88,44 @@ export function buildApiPrompt(
     return `### ${theme}\n${items}`;
   }).join("\n\n");
 
-  // Local questions
-  const localEntries = Object.entries(localQuestions);
+  const hasLocal = !!storkredsName;
+
+  // Local questions (only when storkreds is selected)
+  const localEntries = hasLocal ? Object.entries(localQuestions) : [];
   const localList = localEntries
     .map(([k, q], i) => `  L${i + 1}. [${k}] "${q}"`)
     .join("\n");
 
+  const storkredsLine = hasLocal ? `\nSTORKREDS: ${storkredsName}` : "";
+
+  const localSection = hasLocal
+    ? `
+═══════════════════════════════════════
+LOKALE SPØRGSMÅL FOR ${storkredsName!.toUpperCase()}
+═══════════════════════════════════════
+Væv disse ind efter de første 2-3 nationale temaer:
+
+${localList}
+`
+    : "";
+
+  const localStep = hasLocal
+    ? `
+TRIN 4 — LOKALE SPØRGSMÅL
+- Efter 2-3 nationale temaer, indled med: "Nu vil jeg gerne høre om et par lokale ting for ${storkredsName}..."
+- Dæk mindst 3 af de 5 lokale spørgsmål
+- Gå derefter tilbage til de resterende nationale temaer
+`
+    : "";
+
+  const finishThreshold = hasLocal
+    ? "mindst 15 nationale + 3 lokale spørgsmål"
+    : "mindst 15 nationale spørgsmål";
+
   return `<system>
 DU ER: En venlig, uformel politisk samtalepartner for danske vælgere uden navn. Du hjælper dem med at finde deres kandidat til FV2026.
 SPROG: Svar KUN på dansk. Kort og naturligt — maks 2-3 sætninger pr. besked.
-TÆNK KORT: Brug maksimalt 2-3 korte sætninger til intern tænkning. Gå direkte til dit svar.
-STORKREDS: ${storkredsName}
+TÆNK KORT: Brug maksimalt 2-3 korte sætninger til intern tænkning. Gå direkte til dit svar.${storkredsLine}
 
 ═══════════════════════════════════════
 SAMTALENS FORMÅL
@@ -115,22 +142,15 @@ SPØRGSMÅL AT DÆKKE (nationale)
 Stil spørgsmålene i denne rækkefølge, tema for tema:
 
 ${themedQuestions}
-
-═══════════════════════════════════════
-LOKALE SPØRGSMÅL FOR ${storkredsName.toUpperCase()}
-═══════════════════════════════════════
-Væv disse ind efter de første 2-3 nationale temaer:
-
-${localList}
-
+${localSection}
 ═══════════════════════════════════════
 SAMTALEFLOW — FØLG DETTE PRÆCIST
 ═══════════════════════════════════════
 
-TRIN 1 — VELKOMMEN
-- Byd velkommen
-- Nævn kort at du vil spørge om politik for at matche dem med kandidater
-- Stil det første spørgsmål (Q1) med dine egne ord
+TRIN 1 — START SAMTALEN
+- Start med det FØRSTE spørgsmål (Q1) med det samme — byd kort velkommen i samme besked
+- Hvis brugeren SELV starter med et emne (f.eks. "skat" eller "klima"), så spring direkte til det relevante tema og stil spørgsmål derfra
+- Giv ALDRIG et afvisende svar som "jeg har ikke selv holdninger" — du skal altid stille spørgsmål og engagere dig i emnet
 
 TRIN 2 — FOR HVERT SPØRGSMÅL
 a) Omskriv spørgsmålet til naturligt dansk. Læs IKKE udsagnet ordret op — brug dine egne ord.
@@ -169,14 +189,9 @@ d) Maks 1 opfølgning pr. spørgsmål. Hvis det stadig er uklart, accepter det o
 TRIN 3 — OVERGANG MELLEM TEMAER
 - Lav en kort naturlig overgang: "Godt, lad os snakke lidt om noget andet..."
 - Du BEHØVER IKKE dække alle spørgsmål i et tema — spring over hvis brugeren allerede har udtrykt en klar holdning om emnet
-
-TRIN 4 — LOKALE SPØRGSMÅL
-- Efter 2-3 nationale temaer, indled med: "Nu vil jeg gerne høre om et par lokale ting for ${storkredsName}..."
-- Dæk mindst 3 af de 5 lokale spørgsmål
-- Gå derefter tilbage til de resterende nationale temaer
-
-TRIN 5 — AFSLUTNING
-- Når du har dækket mindst 15 nationale + 3 lokale spørgsmål, opsummer kort hvad du har hørt
+${localStep}
+TRIN ${hasLocal ? 5 : 4} — AFSLUTNING
+- Når du har dækket ${finishThreshold}, opsummer kort hvad du har hørt
 - Fortæl brugeren at de nu kan klikke på "Resultater"-fanen for at se deres matches
 
 ═══════════════════════════════════════

@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+@theme {
+  --color-ft-red: #A03033;
+  --color-ft-red-dark: #8B2528;
+  --color-ft-red-light: #F5E6E7;
+}
+
 html,
 body,
 #root {

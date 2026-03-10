@@ -28,7 +28,7 @@ export const ChoiceToolUI = makeAssistantToolUI<
     if (result) {
       return (
         <div className="mt-2">
-          <span className="inline-block bg-red-50 text-red-700 text-sm px-3 py-1 rounded-full border border-red-200">
+          <span className="inline-block bg-ft-red-light text-ft-red-dark text-sm px-3 py-1 rounded-full border border-ft-red/20">
             {result}
           </span>
         </div>
@@ -42,7 +42,7 @@ export const ChoiceToolUI = makeAssistantToolUI<
             key={option}
             onClick={() => handleClick(option)}
             disabled={!isActive}
-            className="px-4 py-2 bg-white border border-gray-300 rounded-full text-sm font-medium text-gray-700 hover:bg-red-50 hover:border-red-300 hover:text-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 bg-white border border-gray-300 rounded-full text-sm font-medium text-gray-700 hover:bg-ft-red-light hover:border-ft-red/30 hover:text-ft-red-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {option}
           </button>

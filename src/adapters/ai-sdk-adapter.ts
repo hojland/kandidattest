@@ -28,6 +28,9 @@ function createModel(provider: Provider): LanguageModel {
         apiKey: provider.apiKey,
         baseURL: provider.baseUrl,
       })(provider.model);
+
+    default:
+      throw new Error(`Unsupported provider kind for API adapter: ${provider.kind}`);
   }
 }
 

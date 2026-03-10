@@ -8,10 +8,12 @@ import {
 } from "../lib/provider";
 
 interface Props {
+  open: boolean;
+  onClose: () => void;
   onSelect: (provider: Provider) => void;
 }
 
-export function ProviderSelector({ onSelect }: Props) {
+export function ProviderSelector({ open, onClose, onSelect }: Props) {
   const [preset, setPreset] = useState(0);
   const [baseUrl, setBaseUrl] = useState(API_PRESETS[0].baseUrl ?? "");
   const [model, setModel] = useState(API_PRESETS[0].defaultModel);
@@ -25,9 +27,9 @@ export function ProviderSelector({ onSelect }: Props) {
       if (saved.baseUrl) setBaseUrl(saved.baseUrl);
       setApiKey(saved.apiKey);
       setModel(saved.model);
-      setRemember(true);
       const idx = API_PRESETS.findIndex((p) => p.label === saved.label);
       if (idx >= 0) setPreset(idx);
+      setRemember(true);
     }
   }, []);
 
@@ -38,7 +40,7 @@ export function ProviderSelector({ onSelect }: Props) {
     setModel(p.defaultModel);
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  function handleApiSubmit(e: React.FormEvent) {
     e.preventDefault();
     const p = API_PRESETS[preset];
     const provider: Provider = {
@@ -54,23 +56,37 @@ export function ProviderSelector({ onSelect }: Props) {
       clearProviderSession();
     }
     onSelect(provider);
+    onClose();
   }
 
   const currentPreset = API_PRESETS[preset];
   const needsBaseUrl = currentPreset.kind === "openai-compatible";
   const allFilled = apiKey.trim() && model.trim() && (!needsBaseUrl || baseUrl.trim());
 
+  if (!open) return null;
+
   return (
-    <div className="flex flex-col items-center justify-center h-full p-6">
-      <div className="max-w-md w-full">
-        <h1 className="text-2xl font-bold text-red-700 mb-2 text-center">
-          Kandidattest
-        </h1>
-        <p className="text-gray-500 mb-6 text-center">
-          Konfigurer AI-forbindelse
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="relative bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 p-6">
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-xl leading-none"
+        >
+          &times;
+        </button>
+
+        <h2 className="text-xl font-bold text-ft-red-dark mb-1">
+          Indstillinger
+        </h2>
+        <p className="text-gray-500 text-sm mb-5">
+          Vælg AI-udbyder
         </p>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleApiSubmit} className="space-y-4">
           {/* Preset dropdown */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -79,7 +95,7 @@ export function ProviderSelector({ onSelect }: Props) {
             <select
               value={preset}
               onChange={(e) => handlePresetChange(Number(e.target.value))}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-red-200 focus:border-red-300"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ft-red-light focus:border-ft-red"
             >
               {API_PRESETS.map((p, i) => (
                 <option key={p.label} value={i}>
@@ -100,7 +116,7 @@ export function ProviderSelector({ onSelect }: Props) {
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
                 placeholder="https://api.example.com/v1"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-red-200 focus:border-red-300"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ft-red-light focus:border-ft-red"
               />
             </div>
           )}
@@ -115,7 +131,7 @@ export function ProviderSelector({ onSelect }: Props) {
               value={model}
               onChange={(e) => setModel(e.target.value)}
               placeholder={currentPreset.defaultModel}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-red-200 focus:border-red-300"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ft-red-light focus:border-ft-red"
             />
           </div>
 
@@ -129,7 +145,7 @@ export function ProviderSelector({ onSelect }: Props) {
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder={currentPreset.keyPlaceholder}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-red-200 focus:border-red-300"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ft-red-light focus:border-ft-red"
             />
           </div>
 
@@ -137,12 +153,12 @@ export function ProviderSelector({ onSelect }: Props) {
           <div className="flex items-start gap-2">
             <input
               type="checkbox"
-              id="remember"
+              id="remember-api"
               checked={remember}
               onChange={(e) => setRemember(e.target.checked)}
-              className="mt-1 accent-red-600"
+              className="mt-1 accent-ft-red"
             />
-            <label htmlFor="remember" className="text-sm text-gray-600">
+            <label htmlFor="remember-api" className="text-sm text-gray-600">
               <span className="font-medium">Husk for denne session</span>
               <br />
               <span className="text-xs text-gray-400">
@@ -155,9 +171,9 @@ export function ProviderSelector({ onSelect }: Props) {
           <button
             type="submit"
             disabled={!allFilled}
-            className="w-full rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full rounded-lg bg-ft-red px-4 py-2 text-sm font-medium text-white hover:bg-ft-red-dark transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Fortsæt
+            Gem og luk
           </button>
         </form>
       </div>

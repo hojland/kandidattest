@@ -3,6 +3,7 @@ import { streamText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import ReactMarkdown from "react-markdown";
 import type { CandidateData } from "../App";
 import type { Provider } from "../lib/provider";
 
@@ -24,6 +25,8 @@ function createModel(provider: Provider) {
       return createOpenAI({ apiKey: provider.apiKey })(provider.model);
     case "openai-compatible":
       return createOpenAI({ apiKey: provider.apiKey, baseURL: provider.baseUrl })(provider.model);
+    default:
+      return undefined;
   }
 }
 
@@ -92,18 +95,22 @@ Kandidatens prioriteter: ${candidate.priorities?.join(", ") ?? "Ingen angivet"}
 Kandidatens svar på politiske spørgsmål:
 ${answersSection}
 
-Skriv 3-5 korte punkter på dansk om de vigtigste enigheder og uenigheder mellem brugeren og kandidaten. Fokuser på det mest relevante baseret på hvad brugeren faktisk har udtalt sig om. Hold det kort, neutralt og konkret.`;
+Skriv 3-5 korte punkter på dansk om de vigtigste enigheder og uenigheder mellem brugeren og kandidaten. Fokuser på det mest relevante baseret på hvad brugeren faktisk har udtalt sig om. Hold det kort, neutralt og konkret. Brug markdown-formatering med **fed** for nøgleord og bullet points.`;
 
       try {
         const controller = new AbortController();
         abortRef.current = controller;
 
         const model = createModel(provider);
+        if (!model) {
+          setComparisonText("Sammenligning kræver en API-forbindelse.");
+          return;
+        }
         const result = streamText({
           model,
           prompt,
           abortSignal: controller.signal,
-          maxOutputTokens: 1024,
+          maxOutputTokens: 2048,
           temperature: 0.5,
           providerOptions: {
             anthropic: {
@@ -162,7 +169,7 @@ Skriv 3-5 korte punkter på dansk om de vigtigste enigheder og uenigheder mellem
           {candidate.priorities.map((p, i) => (
             <span
               key={i}
-              className="text-xs bg-red-50 text-red-700 px-2 py-0.5 rounded-full"
+              className="text-xs bg-ft-red-light text-ft-red-dark px-2 py-0.5 rounded-full"
             >
               {p}
             </span>
@@ -176,13 +183,78 @@ Skriv 3-5 korte punkter på dansk om de vigtigste enigheder og uenigheder mellem
           Sammenligning med dine holdninger
         </h4>
         {comparisonError ? (
-          <p className="text-sm text-red-600">{comparisonError}</p>
+          <p className="text-sm text-ft-red">{comparisonError}</p>
         ) : comparisonText ? (
-          <div className="text-sm text-gray-700 whitespace-pre-wrap">{comparisonText}</div>
+          <div className="text-sm text-gray-700 prose prose-sm max-w-none">
+            <ReactMarkdown>{comparisonText}</ReactMarkdown>
+          </div>
         ) : comparisonLoading ? (
           <div className="text-sm text-gray-400 animate-pulse">Genererer sammenligning...</div>
         ) : null}
       </div>
+
+      {/* Candidate answers to questions */}
+      {candidate.answers && Object.keys(candidate.answers).length > 0 && (
+        <AnswersSection answers={candidate.answers} questions={questions} />
+      )}
+    </div>
+  );
+}
+
+function AnswersSection({
+  answers,
+  questions,
+}: {
+  answers: Record<string, { score: number; comment: string }>;
+  questions: Record<string, string>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [expandedQ, setExpandedQ] = useState<string | null>(null);
+
+  const entries = Object.entries(answers).filter(([key]) => questions[key]);
+
+  return (
+    <div className="border-t pt-3">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="text-sm font-medium text-gray-700 flex items-center gap-1 hover:text-gray-900"
+      >
+        Kandidatens svar ({entries.length} spørgsmål)
+        <span className="text-xs">{expanded ? "▾" : "▸"}</span>
+      </button>
+      {expanded && (
+        <div className="mt-2 space-y-1">
+          {entries.map(([key, ans]) => {
+            const isOpen = expandedQ === key;
+            const label = SCORE_LABELS[ans.score] ?? `${ans.score}`;
+            const scoreColor =
+              ans.score >= 1
+                ? "text-green-700"
+                : ans.score <= -1
+                  ? "text-red-700"
+                  : "text-gray-500";
+            return (
+              <div key={key} className="border rounded bg-white">
+                <button
+                  onClick={() => setExpandedQ(isOpen ? null : key)}
+                  className="w-full text-left px-3 py-2 flex items-center gap-2 text-sm hover:bg-gray-50"
+                >
+                  <span className={`font-medium text-xs shrink-0 ${scoreColor}`}>
+                    {label}
+                  </span>
+                  <span className="text-gray-700 flex-1">{questions[key]}</span>
+                  <span className="text-xs text-gray-400">{isOpen ? "▾" : "▸"}</span>
+                </button>
+                {isOpen && ans.comment && (
+                  <div className="px-3 pb-2 text-sm text-gray-600 italic border-t">
+                    &ldquo;{ans.comment}&rdquo;
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

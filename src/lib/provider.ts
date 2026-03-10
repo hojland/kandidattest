@@ -36,7 +36,7 @@ export function loadProviderSession(): Provider | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
-    if (parsed.kind && parsed.apiKey && parsed.model) return parsed as Provider;
+    if (parsed.kind && parsed.model && parsed.apiKey) return parsed as Provider;
   } catch { /* ignore */ }
   return null;
 }
