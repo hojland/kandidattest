@@ -113,9 +113,35 @@ function AssistantMessage() {
   );
 }
 
+/** Track virtual keyboard height via the Visual Viewport API. */
+function useKeyboardHeight() {
+  const [height, setHeight] = useState(0);
+
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const onResize = () => {
+      // Keyboard height = difference between layout viewport and visual viewport
+      const kbHeight = window.innerHeight - vv.height;
+      setHeight(kbHeight > 0 ? kbHeight : 0);
+    };
+
+    vv.addEventListener("resize", onResize);
+    return () => vv.removeEventListener("resize", onResize);
+  }, []);
+
+  return height;
+}
+
 function Composer() {
+  const keyboardHeight = useKeyboardHeight();
+
   return (
-    <div className="border-t bg-white p-4">
+    <div
+      className="border-t bg-white p-4 transition-[padding] duration-100"
+      style={{ paddingBottom: keyboardHeight > 0 ? `${keyboardHeight + 16}px` : undefined }}
+    >
       <div className="max-w-3xl mx-auto w-full">
         <ComposerPrimitive.Root className="relative">
           <ComposerPrimitive.Input
@@ -369,7 +395,7 @@ export default function App() {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <div className="h-dvh flex flex-col bg-white">
+      <div className="h-screen flex flex-col bg-white">
         {/* Header */}
         <header className="border-b bg-white shrink-0">
           <div className="max-w-5xl mx-auto w-full px-4 py-2 flex items-center gap-3">
