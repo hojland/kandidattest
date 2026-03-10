@@ -113,17 +113,30 @@ function AssistantMessage() {
   );
 }
 
-/** Track the visual viewport height so the app fits above the iOS keyboard. */
+/** Track the visual viewport height so the app fits above the iOS keyboard.
+ *  Also prevents iOS Safari from scrolling the page when the keyboard opens. */
 function useVisualViewportHeight() {
   const [height, setHeight] = useState(
     () => window.visualViewport?.height ?? window.innerHeight,
   );
 
   useEffect(() => {
+    // Lock html/body to prevent iOS page-level scroll
+    document.documentElement.style.overflow = "hidden";
+    document.documentElement.style.height = "100%";
+    document.body.style.overflow = "hidden";
+    document.body.style.height = "100%";
+    document.body.style.position = "fixed";
+    document.body.style.width = "100%";
+
     const vv = window.visualViewport;
     if (!vv) return;
 
-    const update = () => setHeight(vv.height);
+    const update = () => {
+      setHeight(vv.height);
+      // Force-reset any scroll iOS applied
+      window.scrollTo(0, 0);
+    };
 
     vv.addEventListener("resize", update);
     vv.addEventListener("scroll", update);
