@@ -149,9 +149,9 @@ function useVisualViewportHeight() {
   return height;
 }
 
-function Composer() {
+function Composer({ requestCount }: { requestCount: number }) {
   return (
-    <div className="border-t bg-white p-4">
+    <div className="border-t bg-white p-4 pb-2">
       <div className="max-w-3xl mx-auto w-full">
         <ComposerPrimitive.Root className="relative">
           <ComposerPrimitive.Input
@@ -164,6 +164,7 @@ function Composer() {
             </svg>
           </ComposerPrimitive.Send>
         </ComposerPrimitive.Root>
+        <StatusNote requestCount={requestCount} />
       </div>
     </div>
   );
@@ -182,15 +183,9 @@ const TOTAL_QUESTIONS = 24;
 // Gemini free tier: 1,500 requests/day
 const GEMINI_FREE_TIER_RPD = 1500;
 
-// --- Progress bar shown above chat ---
+// --- Subtle status note shown below composer ---
 
-function ProgressBar({
-  requestCount,
-  onGoToResults,
-}: {
-  requestCount: number;
-  onGoToResults: () => void;
-}) {
+function StatusNote({ requestCount }: { requestCount: number }) {
   const threadRuntime = useThreadRuntime();
   const [questionCount, setQuestionCount] = useState(0);
 
@@ -202,35 +197,13 @@ function ProgressBar({
     });
   }, [threadRuntime]);
 
-  const progress = Math.min(questionCount / TOTAL_QUESTIONS, 1);
   const budgetPct = Math.min((requestCount / GEMINI_FREE_TIER_RPD) * 100, 100);
 
   if (questionCount === 0) return null;
 
   return (
-    <div className="border-b bg-gray-50 px-4 py-2 shrink-0">
-      <div className="max-w-3xl mx-auto flex items-center gap-3 text-xs text-gray-500">
-        <div className="flex-1">
-          <div className="flex justify-between mb-1">
-            <span>Spørgsmål {questionCount}/{TOTAL_QUESTIONS}</span>
-            <button
-              onClick={onGoToResults}
-              className="text-ft-red-dark hover:underline"
-            >
-              Se resultater nu →
-            </button>
-          </div>
-          <div className="w-full bg-gray-200 rounded-full h-1.5">
-            <div
-              className="bg-ft-red h-1.5 rounded-full transition-all duration-300"
-              style={{ width: `${progress * 100}%` }}
-            />
-          </div>
-        </div>
-        <span className="whitespace-nowrap text-gray-400" title="Gemini free tier forbrug (dagligt)">
-          {budgetPct.toFixed(1)}% brugt
-        </span>
-      </div>
+    <div className="text-[10px] text-gray-400 text-right pr-1 pt-0.5">
+      Spørgsmål {questionCount}/{TOTAL_QUESTIONS} · {budgetPct.toFixed(1)}% brugt
     </div>
   );
 }
@@ -284,7 +257,7 @@ function WelcomeScreen({ hasProvider, onOpenSettings }: { hasProvider: boolean; 
   );
 }
 
-function ChatThread({ hasProvider, onOpenSettings }: { hasProvider: boolean; onOpenSettings: () => void }) {
+function ChatThread({ hasProvider, onOpenSettings, requestCount }: { hasProvider: boolean; onOpenSettings: () => void; requestCount: number }) {
   return (
     <ThreadPrimitive.Root className="flex flex-col h-full">
       <ThreadPrimitive.Viewport className="flex-1 overflow-y-auto">
@@ -301,7 +274,7 @@ function ChatThread({ hasProvider, onOpenSettings }: { hasProvider: boolean; onO
         </div>
         <ThreadPrimitive.ViewportFooter />
       </ThreadPrimitive.Viewport>
-      <Composer />
+      <Composer requestCount={requestCount} />
     </ThreadPrimitive.Root>
   );
 }
@@ -631,17 +604,12 @@ export default function App() {
 
         {/* Main content */}
         {screen === "chat" ? (
-          <div className="flex-1 overflow-hidden flex flex-col">
-            <ProgressBar
+          <div className="flex-1 overflow-hidden">
+            <ChatThread
+              hasProvider={!!provider}
+              onOpenSettings={() => setShowSettings(true)}
               requestCount={requestCount}
-              onGoToResults={() => setScreen("results")}
             />
-            <div className="flex-1 overflow-hidden">
-              <ChatThread
-                hasProvider={!!provider}
-                onOpenSettings={() => setShowSettings(true)}
-              />
-            </div>
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto">
