@@ -34,9 +34,16 @@ function createModel(provider: Provider): LanguageModel {
   }
 }
 
+export interface UsageInfo {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 export function createAISDKAdapter(
   provider: Provider,
   systemPrompt: string,
+  onUsage?: (usage: UsageInfo) => void,
 ): ChatModelAdapter {
   const model = createModel(provider);
 
@@ -132,6 +139,18 @@ export function createAISDKAdapter(
         } else {
           yield { content: buildParts(text) };
         }
+      }
+
+      // Report token usage
+      if (onUsage) {
+        try {
+          const usage = await result.usage;
+          onUsage({
+            promptTokens: usage.inputTokens ?? 0,
+            completionTokens: usage.outputTokens ?? 0,
+            totalTokens: usage.totalTokens ?? 0,
+          });
+        } catch { /* usage not available */ }
       }
 
       // If stream ended with only reasoning and no content

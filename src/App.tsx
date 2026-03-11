@@ -8,7 +8,7 @@ import {
   useMessagePartText,
   useThreadRuntime,
 } from "@assistant-ui/react";
-import { createAISDKAdapter } from "./adapters/ai-sdk-adapter";
+import { createAISDKAdapter, type UsageInfo } from "./adapters/ai-sdk-adapter";
 import { EmbeddingManager } from "./lib/embeddings";
 import { buildApiPrompt } from "./lib/system-prompt";
 import type { Provider } from "./lib/provider";
@@ -178,6 +178,63 @@ const SUGGESTIONS = [
   "Hvad er vigtigst for dig ved dette valg?",
 ];
 
+const TOTAL_QUESTIONS = 24;
+// Gemini free tier: 1,500 requests/day
+const GEMINI_FREE_TIER_RPD = 1500;
+
+// --- Progress bar shown above chat ---
+
+function ProgressBar({
+  requestCount,
+  onGoToResults,
+}: {
+  requestCount: number;
+  onGoToResults: () => void;
+}) {
+  const threadRuntime = useThreadRuntime();
+  const [questionCount, setQuestionCount] = useState(0);
+
+  useEffect(() => {
+    return threadRuntime.subscribe(() => {
+      const msgs = threadRuntime.getState().messages ?? [];
+      const userMsgs = msgs.filter((m: any) => m.role === "user").length;
+      setQuestionCount(userMsgs);
+    });
+  }, [threadRuntime]);
+
+  const progress = Math.min(questionCount / TOTAL_QUESTIONS, 1);
+  const budgetPct = Math.min((requestCount / GEMINI_FREE_TIER_RPD) * 100, 100);
+
+  if (questionCount === 0) return null;
+
+  return (
+    <div className="border-b bg-gray-50 px-4 py-2 shrink-0">
+      <div className="max-w-3xl mx-auto flex items-center gap-3 text-xs text-gray-500">
+        <div className="flex-1">
+          <div className="flex justify-between mb-1">
+            <span>Spørgsmål {questionCount}/{TOTAL_QUESTIONS}</span>
+            <button
+              onClick={onGoToResults}
+              className="text-ft-red-dark hover:underline"
+            >
+              Se resultater nu →
+            </button>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-1.5">
+            <div
+              className="bg-ft-red h-1.5 rounded-full transition-all duration-300"
+              style={{ width: `${progress * 100}%` }}
+            />
+          </div>
+        </div>
+        <span className="whitespace-nowrap text-gray-400" title="Gemini free tier forbrug (dagligt)">
+          {budgetPct.toFixed(1)}% brugt
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function WelcomeScreen({ hasProvider, onOpenSettings }: { hasProvider: boolean; onOpenSettings: () => void }) {
   const threadRuntime = useThreadRuntime();
 
@@ -186,8 +243,11 @@ function WelcomeScreen({ hasProvider, onOpenSettings }: { hasProvider: boolean; 
       <h2 className="text-2xl font-bold text-ft-red-dark mb-2">
         Velkommen til Kandidattesten
       </h2>
-      <p className="text-gray-500 mb-8 text-center max-w-md">
+      <p className="text-gray-500 mb-2 text-center max-w-md">
         Fortæl mig om dine politiske holdninger, så finder vi dine kandidater
+      </p>
+      <p className="text-gray-400 mb-8 text-center max-w-md text-sm">
+        Du behøver ikke svare på alle spørgsmål — fortæl om det der er vigtigst for dig og gå til Resultater når du vil
       </p>
 
       {!hasProvider ? (
@@ -411,6 +471,7 @@ export default function App() {
   const [screen, setScreen] = useState<"chat" | "results">("chat");
   const [questions, setQuestions] = useState<Record<string, string>>({});
   const [showSettings, setShowSettings] = useState(false);
+  const [requestCount, setRequestCount] = useState(0);
   const getUserMessagesRef = useRef<() => string[]>(() => []);
 
   const handleProgress = useCallback(
@@ -493,9 +554,14 @@ export default function App() {
     setProvider(p);
   }, []);
 
+  const handleUsage = useCallback((usage: UsageInfo) => {
+    setRequestCount((c) => c + 1);
+    console.log("[APP] Token usage:", usage);
+  }, []);
+
   const adapter = (() => {
     if (!provider) return createStubAdapter();
-    return createAISDKAdapter(provider, systemPrompt ?? "");
+    return createAISDKAdapter(provider, systemPrompt ?? "", handleUsage);
   })();
 
   const runtime = useLocalRuntime(adapter);
@@ -565,11 +631,17 @@ export default function App() {
 
         {/* Main content */}
         {screen === "chat" ? (
-          <div className="flex-1 overflow-hidden">
-            <ChatThread
-              hasProvider={!!provider}
-              onOpenSettings={() => setShowSettings(true)}
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <ProgressBar
+              requestCount={requestCount}
+              onGoToResults={() => setScreen("results")}
             />
+            <div className="flex-1 overflow-hidden">
+              <ChatThread
+                hasProvider={!!provider}
+                onOpenSettings={() => setShowSettings(true)}
+              />
+            </div>
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto">
