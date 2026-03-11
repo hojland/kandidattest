@@ -281,6 +281,102 @@ function createStubAdapter(message?: string) {
   };
 }
 
+// --- Session persistence helpers ---
+
+const STORAGE_KEY = "ktest_saved_chat";
+
+function saveSession(messages: Array<{ role: string; content: any[] }>) {
+  const serializable = messages.map((m) => ({
+    role: m.role,
+    content: m.content
+      .filter((p: any) => p.type === "text")
+      .map((p: any) => ({ type: "text" as const, text: p.text })),
+  }));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(serializable));
+}
+
+function loadSession(): Array<{ role: "user" | "assistant"; content: string }> | null {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function clearSession() {
+  localStorage.removeItem(STORAGE_KEY);
+}
+
+function hasSavedSession() {
+  return localStorage.getItem(STORAGE_KEY) !== null;
+}
+
+// --- Save / Load / Clear session buttons ---
+
+function SaveSessionButton() {
+  const threadRuntime = useThreadRuntime();
+  const [saved, setSaved] = useState(false);
+  const [hasExisting, setHasExisting] = useState(hasSavedSession);
+
+  const handleSave = () => {
+    const state = threadRuntime.getState();
+    const msgs = state.messages ?? [];
+    if (msgs.length === 0) return;
+    saveSession(msgs as any);
+    setSaved(true);
+    setHasExisting(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  const handleLoad = () => {
+    const msgs = loadSession();
+    if (!msgs) return;
+    threadRuntime.reset(
+      msgs.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: typeof m.content === "string" ? m.content : m.content,
+      })),
+    );
+  };
+
+  const handleClear = () => {
+    clearSession();
+    setHasExisting(false);
+  };
+
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        onClick={handleSave}
+        className="text-xs text-gray-500 hover:text-ft-red-dark transition whitespace-nowrap"
+        title="Gem samtale til browser"
+      >
+        {saved ? "Gemt ✓" : "Gem Samtale"}
+      </button>
+      {hasExisting && (
+        <>
+          <button
+            onClick={handleLoad}
+            className="text-xs text-gray-500 hover:text-ft-red-dark transition whitespace-nowrap"
+            title="Indlæs gemt samtale"
+          >
+            Indlæs
+          </button>
+          <button
+            onClick={handleClear}
+            className="text-xs text-gray-400 hover:text-red-500 transition"
+            title="Slet gemt samtale"
+          >
+            ✕
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 // --- Settings gear icon ---
 
 function SettingsButton({ hasProvider, onClick }: { hasProvider: boolean; onClick: () => void }) {
@@ -425,13 +521,14 @@ export default function App() {
               Kandidattest
             </h1>
 
-            {/* Right: Provider info + Settings */}
+            {/* Right: Provider info + Save + Settings */}
             <div className="flex items-center gap-2">
               {provider && (
                 <span className="text-xs text-gray-400 hidden sm:inline">
                   {`${provider.label}: ${provider.model}`}
                 </span>
               )}
+              <SaveSessionButton />
               <SettingsButton
                 hasProvider={!!provider}
                 onClick={() => setShowSettings(true)}
